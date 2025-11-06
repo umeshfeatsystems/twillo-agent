@@ -1,13 +1,41 @@
 from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse, Gather, Dial, Redirect
+from twilio.twiml.voice_response import VoiceResponse, Gather, Dial
 from config import Config
-from datetime import datetime
 import uuid
 
 class TwilioService:
     def __init__(self):
         self.client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         self.from_number = Config.TWILIO_PHONE_NUMBER
+        
+        # ============================================
+        # TTS OPTIMIZATION CONFIG
+        # ============================================
+        # Use consistent voice settings across ALL responses
+        self.VOICE_CONFIG = {
+            'voice': 'Polly.Aditi',  # Indian English female voice
+            'language': 'en-IN',
+            # NEW: Add prosody control for consistency
+            'rate': '95%',  # Slightly slower for clarity (was default 100%)
+            # Using SSML for advanced control would be ideal, but keeping it simple
+        }
+        
+        # STT (Speech Recognition) optimization
+        self.STT_CONFIG = {
+            'input': 'speech',
+            'timeout': 5,
+            'speech_timeout': 'auto',
+            'language': 'en-IN',
+            'speechModel': 'phone_call',  # Optimized for phone audio
+            # Enhanced hints for better recognition
+            'hints': (
+                'yes, no, speaking, this is him, this is her, wrong number, '
+                'payment, pay, tomorrow, today, later, week, month, '
+                'manager, supervisor, agent, transfer, help, '
+                'lost job, financial problem, extension, dispute, '
+                'paid already, will pay, cannot pay'
+            )
+        }
     
     def initiate_call(self, to_number, customer_id):
         """Initiate an outbound call to the customer"""
@@ -19,7 +47,6 @@ class TwilioService:
             recording_status_callback_url = f"{Config.BASE_URL}/api/call/handle-recording"
             
             print(f"[TWILIO] Initiating call to {to_number}")
-            print(f"[TWILIO] Callback URL: {callback_url}")
             
             call = self.client.calls.create(
                 to=to_number,
@@ -54,35 +81,56 @@ class TwilioService:
                 'error': str(e)
             }
     
+    def _normalize_script_for_tts(self, text):
+        """
+        Normalize script text for consistent TTS delivery.
+        Ensures consistent punctuation and formatting.
+        """
+        # Remove extra spaces
+        text = ' '.join(text.split())
+        
+        # Ensure sentences end with proper punctuation
+        if text and text[-1] not in '.!?':
+            text += '.'
+        
+        # Add natural pauses with commas (if not present)
+        # Example: "Hello this is a call from" -> "Hello, this is a call from"
+        # This is already handled in templates, but double-check
+        
+        return text
+    
+    def _create_say_element(self, response, text):
+        """
+        Create a <Say> element with consistent voice configuration.
+        This ensures ALL spoken text sounds the same.
+        """
+        normalized_text = self._normalize_script_for_tts(text)
+        
+        # Use SSML for better prosody control
+        ssml_text = f'<speak><prosody rate="{self.VOICE_CONFIG["rate"]}">{normalized_text}</prosody></speak>'
+        
+        response.say(
+            ssml_text,
+            voice=self.VOICE_CONFIG['voice'],
+            language=self.VOICE_CONFIG['language']
+        )
+    
     def generate_initial_twiml(self, script_text, customer_id):
-        """
-        Generate TwiML for the initial greeting.
-        """
+        """Generate TwiML for initial greeting with optimized voice"""
         response = VoiceResponse()
         
-        # Create a Gather to capture speech
         gather = Gather(
-            input='speech',
             action=f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST',
-            timeout=5,
-            speech_timeout='auto',
-            language='en-IN',
-            # --- STT FIX #1 ---
-            speechModel='phone_call',  # Use model trained for phone audio
-            # --- STT FIX #2 ---
-            hints='yes, no, speaking, this is him, this is her, wrong number, Rajesh Kumar, who is this, I am Rajesh, yes I am, this is Rajesh'
+            **self.STT_CONFIG
         )
         
-        gather.say(
-            script_text,
-            voice='Polly.Aditi',
-            language='en-IN'
-        )
+        # Use consistent voice configuration
+        self._create_say_element(gather, script_text)
         
         response.append(gather)
         
-        # Fallback if no input is detected
+        # Fallback
         response.redirect(
             f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST'
@@ -93,34 +141,21 @@ class TwilioService:
         return twiml_str
     
     def generate_followup_twiml(self, followup_text, customer_id):
-        """
-        Generate TwiML for follow-up responses in the conversation.
-        """
+        """Generate TwiML for follow-up responses with optimized voice"""
         response = VoiceResponse()
-
-        # Create Gather for next response
+        
         gather = Gather(
-            input='speech',
             action=f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST',
-            timeout=5,
-            speech_timeout='auto',
-            language='en-IN',
-            # --- STT FIX #1 ---
-            speechModel='phone_call',  # Use model trained for phone audio
-            # --- STT FIX #2 ---
-            hints='yes, no, payment, pay, tomorrow, today, later, manager, transfer, help, problem, lost my job, supervisor, agent, speak to manager, speak to an agent, partial payment, payment plan, extension'
+            **self.STT_CONFIG
         )
-
-        gather.say(
-            followup_text,
-            voice='Polly.Aditi',
-            language='en-IN'
-        )
+        
+        # Use consistent voice configuration
+        self._create_say_element(gather, followup_text)
         
         response.append(gather)
         
-        # Fallback if no response
+        # Fallback
         response.redirect(
             f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST'
@@ -131,83 +166,57 @@ class TwilioService:
         return twiml_str
     
     def generate_goodbye_twiml(self, text):
-        """Generate TwiML to end the call with a specific message"""
+        """Generate TwiML to end call with optimized voice"""
         response = VoiceResponse()
-        response.say(
-            text,
-            voice='Polly.Aditi',
-            language='en-IN'
-        )
+        self._create_say_element(response, text)
         response.hangup()
         
-        twiml_str = str(response)
         print(f"[TWILIO] Generated goodbye TwiML")
-        return twiml_str
+        return str(response)
     
     def generate_hangup_for_machine_twiml(self):
-        """Generate TwiML for when an answering machine is detected"""
+        """Generate TwiML for answering machine detection"""
         response = VoiceResponse()
         response.hangup()
         return str(response)
-
-    # --- THIS IS THE MODIFIED FUNCTION ---
+    
     def generate_transfer_twiml(self, text):
-        """
-        Generate TwiML to say a message and then transfer the call to a human agent.
-        """
+        """Generate TwiML to transfer call with optimized voice"""
         response = VoiceResponse()
         
-        response.say(
-            text,
-            voice='Polly.Aditi',
-            language='en-IN'
-        )
+        self._create_say_element(response, text)
         
         if not Config.AGENT_PHONE_NUMBER:
-            response.say(
-                "I apologize, but we're unable to transfer your call at this moment. We'll have a specialist call you back within the next hour. Thank you for your patience.",
-                voice='Polly.Aditi',
-                language='en-IN'
+            fallback_text = (
+                "I apologize, but we're unable to transfer your call at this moment. "
+                "We'll have a specialist call you back within the next hour. "
+                "Thank you for your patience."
             )
+            self._create_say_element(response, fallback_text)
             response.hangup()
         else:
             dial = Dial(
                 caller_id=Config.TWILIO_PHONE_NUMBER,
                 timeout=30,
-                # --- THIS IS THE FIX ---
-                # Point 'action' to our new logic-handling webhook
                 action=f'{Config.BASE_URL}/api/call/handle-transfer-status',
                 method='POST'
             )
             dial.number(Config.AGENT_PHONE_NUMBER)
             response.append(dial)
-            
-            # --- THIS IS THE FIX ---
-            # We REMOVE the TwiML after the <Dial>.
-            # The 'action' webhook now handles all post-dial logic.
         
-        twiml_str = str(response)
-        print(f"[TWILIO] Generated transfer TwiML (with new action webhook)")
-        return twiml_str
+        print(f"[TWILIO] Generated transfer TwiML")
+        return str(response)
     
     def generate_say_and_redirect_twiml(self, text, redirect_url):
         """
-        Generate TwiML to say a message and then immediately redirect.
-        This is a "Fast" webhook.
+        Generate TwiML to say a message and redirect.
+        Used for "fast" webhooks with consistent voice.
         """
         response = VoiceResponse()
         
-        response.say(
-            text,
-            voice='Polly.Aditi',
-            language='en-IN'
-        )
+        self._create_say_element(response, text)
         
-        response.redirect(
-            redirect_url,
-            method='POST'
-        )
+        response.redirect(redirect_url, method='POST')
         
-        twiml_str = str(response)
-        print(f"[TWILIO] Generated Say-and-Redirect TwiML (Music: False)")
-        return twiml_str
+        print(f"[TWILIO] Generated Say-and-Redirect TwiML")
+        return str(response)
