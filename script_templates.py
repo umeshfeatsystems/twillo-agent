@@ -131,6 +131,15 @@ class ScriptTemplates:
         'SMALL_TALK': [
             "I appreciate that, {customer_name}. However, I do need to discuss your {loan_type} payment. Could we focus on that for just a moment?",
             "That's nice to hear. Now, regarding your pending payment of rupees {amount}, how would you like to proceed?"
+        ],
+        
+        # ============================================
+        # NEW: Polite Exit Responses
+        # ============================================
+        'POLITE_EXIT': [
+            "Thank you so much for your time, {customer_name}. We'll send you a payment link shortly. Have a wonderful day!",
+            "Perfect, thank you {customer_name}. You'll receive all the details on your registered number. Have a great day!",
+            "Excellent. Thank you for speaking with me, {customer_name}. We'll follow up with the payment link. Take care!"
         ]
     }
     
