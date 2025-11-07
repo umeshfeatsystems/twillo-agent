@@ -17,24 +17,27 @@ class LanguageConfig:
             'name': 'English',
             'code': 'en',
             'locale': 'en-IN',
-            'voice': 'Polly.Aditi',  # Female Indian English
-            'alt_voice': 'Polly.Raveena',  # Alternative voice
+            'voice': 'Polly.Aditi',
+            'alt_voice': 'Polly.Raveena',
             'stt_language': 'en-IN',
             'speech_hints': (
                 'yes, no, speaking, payment, pay, tomorrow, today, later, '
-                'manager, supervisor, help, extension, dispute'
+                'manager, supervisor, help, extension, dispute, haan, ha, nahi, '
+                'paying now, will pay, already paid, financial problem, job lost'
             )
         },
         'hi': {
             'name': 'Hindi',
             'code': 'hi',
             'locale': 'hi-IN',
-            'voice': 'Polly.Aditi',  # Aditi supports Hindi too
-            'alt_voice': 'Polly.Kajal',  # Hindi-specific voice
+            'voice': 'Polly.Aditi',
+            'alt_voice': 'Polly.Kajal',
             'stt_language': 'hi-IN',
             'speech_hints': (
-                'हाँ, नहीं, बोल रहा हूँ, भुगतान, पे करूंगा, कल, आज, '
-                'मैनेजर, सुपरवाइजर, मदद, समय, विवाद'
+                'हां, नहीं, बोल रहा हूं, भुगतान, पे करूंगा, कल, आज, '
+                'मैनेजर, सुपरवाइजर, मदद, समय, विवाद, '
+                'अभी भर रही, कर रहा, पहले ही किया, नौकरी चली गई, '
+                'yes, no, payment, pay, abhi, kal, already, help'
             )
         }
     }
@@ -46,12 +49,12 @@ class LanguageConfig:
     # IVR MENU CONFIGURATION
     # ============================================
     IVR_MENU = {
-        'timeout': 5,  # Seconds to wait for input
-        'num_digits': 1,  # Single digit selection
-        'finish_on_key': '',  # Don't wait for # key
+        'timeout': 5,
+        'num_digits': 1,
+        'finish_on_key': '',
         'language_map': {
-            '1': 'hi',  # Press 1 for Hindi
-            '2': 'en'   # Press 2 for English
+            '1': 'hi',
+            '2': 'en'
         }
     }
     
@@ -59,7 +62,7 @@ class LanguageConfig:
     # IVR WELCOME MESSAGE (Bilingual)
     # ============================================
     IVR_WELCOME_MESSAGE = (
-        # Hindi first (as per Indian preference)
+        # Hindi first
         "नमस्ते। हिंदी में जारी रखने के लिए एक दबाएं। "
         # English
         "Hello. Press one for Hindi. Press two for English. "

@@ -9,7 +9,6 @@ class TwilioService:
         self.client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         self.from_number = Config.TWILIO_PHONE_NUMBER
         
-        # Base TTS configuration (will be overridden per language)
         self.PROSODY_RATE = '95%'
     
     def initiate_call(self, to_number, customer_id):
@@ -75,7 +74,6 @@ class TwilioService:
         normalized_text = self._normalize_script_for_tts(text)
         lang_config = LanguageConfig.get_language_config(language)
         
-        # Use SSML for better control
         ssml_text = f'<speak><prosody rate="{self.PROSODY_RATE}">{normalized_text}</prosody></speak>'
         
         response.say(
@@ -86,7 +84,7 @@ class TwilioService:
     
     def generate_language_selection_twiml(self, customer_id, is_repeat=False):
         """
-        NEW: Generate IVR menu for language selection.
+        Generate IVR menu for language selection.
         
         Args:
             customer_id: Customer ID
@@ -94,32 +92,30 @@ class TwilioService:
         """
         response = VoiceResponse()
         
-        # Use bilingual voice (Aditi supports both Hindi and English)
         gather = Gather(
             action=f'{Config.BASE_URL}/api/call/language-selected?customer_id={customer_id}',
             method='POST',
-            input='dtmf',  # Only digit input for menu
+            input='dtmf',
             timeout=LanguageConfig.IVR_MENU['timeout'],
             num_digits=LanguageConfig.IVR_MENU['num_digits'],
             finish_on_key=LanguageConfig.IVR_MENU['finish_on_key']
         )
         
-        # Choose message based on whether it's a repeat
         if is_repeat:
             message = LanguageConfig.IVR_INVALID_MESSAGE + " " + LanguageConfig.IVR_REPEAT_MESSAGE
         else:
             message = LanguageConfig.IVR_WELCOME_MESSAGE
         
-        # For bilingual message, use a neutral voice
+        ssml_message = f'<speak><prosody rate="85%">{message}</prosody></speak>'
+        
         gather.say(
-            message,
-            voice='Polly.Aditi',  # Aditi can speak both languages
-            language='hi-IN'  # Set to Hindi as primary
+            ssml_message,
+            voice='Polly.Aditi',
+            language='hi-IN'
         )
         
         response.append(gather)
         
-        # If no input, repeat the menu
         response.redirect(
             f'{Config.BASE_URL}/api/call/language-selected?customer_id={customer_id}',
             method='POST'
@@ -151,7 +147,6 @@ class TwilioService:
         self._create_say_element(gather, script_text, language)
         response.append(gather)
         
-        # Fallback
         response.redirect(
             f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST'
@@ -181,7 +176,6 @@ class TwilioService:
         self._create_say_element(gather, followup_text, language)
         response.append(gather)
         
-        # Fallback
         response.redirect(
             f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST'

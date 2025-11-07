@@ -1,17 +1,14 @@
 """
 Multi-lingual Script Templates
-Professional scripts in Hindi and English
+Professional scripts in Hindi and English with proper gender forms
 """
 
 class MultilingualScriptTemplates:
     """
     Bilingual script templates with professional translations.
-    All Hindi scripts are professionally translated and TTS-optimized.
+    All Hindi scripts use FEMININE forms to match Polly.Aditi voice.
     """
     
-    # ============================================
-    # VERIFICATION SCRIPTS
-    # ============================================
     VERIFICATION_SCRIPTS = {
         'en': [
             "Hello, this is a call from {bank_name}. Am I speaking with {customer_name}?",
@@ -19,15 +16,12 @@ class MultilingualScriptTemplates:
             "Good {time_of_day}, this is {bank_name} calling. Is this {customer_name}?"
         ],
         'hi': [
-            "नमस्ते, यह {bank_name} की तरफ से कॉल है। क्या मैं {customer_name} जी से बात कर रहा हूँ?",
-            "नमस्कार, मैं {bank_name} से बोल रहा हूँ। क्या मैं {customer_name} जी से बात कर सकता हूँ?",
+            "नमस्ते, यह {bank_name} की तरफ से कॉल है। क्या मैं {customer_name} जी से बात कर रही हूं?",
+            "नमस्कार, मैं {bank_name} से बोल रही हूं। क्या मैं {customer_name} जी से बात कर सकती हूं?",
             "सुप्रभात, यह {bank_name} की तरफ से कॉल है। क्या यह {customer_name} जी हैं?"
         ]
     }
     
-    # ============================================
-    # VERIFICATION RESPONSES
-    # ============================================
     VERIFICATION_RESPONSES = {
         'en': {
             'CONFIRMED_IDENTITY': [
@@ -63,153 +57,114 @@ class MultilingualScriptTemplates:
                 "असुविधा के लिए क्षमा करें। हम इसे अपने सिस्टम में ठीक कर देंगे। धन्यवाद।"
             ],
             'NOT_INTERESTED': [
-                "मैं समझता हूँ। मैं नोट कर लूंगा कि आप संपर्क नहीं चाहते। आपका दिन शुभ हो।",
-                "कोई बात नहीं। मैं आपकी प्राथमिकताएं अभी अपडेट कर दूंगा। अलविदा।"
+                "मैं समझती हूं। मैं नोट कर लूंगी कि आप संपर्क नहीं चाहते। आपका दिन शुभ हो।",
+                "कोई बात नहीं। मैं आपकी प्राथमिकताएं अभी अपडेट कर दूंगी। अलविदा।"
             ],
             'CONFUSION': [
                 "यह {bank_name} की तरफ से {customer_name} जी के अकाउंट के बारे में कॉल है। क्या वो उपलब्ध हैं?",
-                "मैं {bank_name} से {customer_name} जी के लिए बोल रहा हूँ। क्या मैं उनसे बात कर सकता हूँ?"
+                "मैं {bank_name} से {customer_name} जी के लिए बोल रही हूं। क्या मैं उनसे बात कर सकती हूं?"
             ],
             'UNCLEAR': [
-                "मुझे खेद है, मैं ठीक से समझ नहीं पाया। क्या यह {customer_name} जी बोल रहे हैं?",
+                "मुझे खेद है, मैं ठीक से समझ नहीं पाई। क्या यह {customer_name} जी बोल रहे हैं?",
                 "क्षमा करें, क्या आप पुष्टि कर सकते हैं कि यह {customer_name} जी हैं?"
             ]
         }
     }
     
-    # ============================================
-    # EMI PRESENTATION SCRIPTS
-    # ============================================
     EMI_SCRIPTS = {
         'en': {
-            'first_time': (
+            'current': (
                 "I'm reaching out regarding your {loan_type}. "
-                "Our records show a pending installment of rupees {amount} which was due on {due_date}. "
+                "Our records show a pending installment of rupees {amount} which was due on {due_date_spoken}. "
                 "I'd like to help resolve this. Could you tell me how you'd like to proceed?"
-            ),
-            'with_history': (
-                "I'm calling about your {loan_type}. "
-                "I see we last spoke on {last_call_date}, and our records still show the pending amount of rupees {amount} from {due_date}. "
-                "I was hoping we could find a solution today. What's the current situation?"
             ),
             'overdue': (
                 "I'm reaching out about your {loan_type}. "
-                "The payment of rupees {amount} has been overdue since {due_date}. "
+                "The payment of rupees {amount} has been overdue since {due_date_spoken}. "
                 "I understand things can get busy, so I'm here to help. How would you like to handle this payment?"
             )
         },
         'hi': {
-            'first_time': (
-                "मैं आपके {loan_type} के बारे में बात करने के लिए कॉल कर रहा हूँ। "
-                "हमारे रिकॉर्ड के अनुसार {amount} रुपये की किस्त {due_date} को देय थी जो अभी लंबित है। "
-                "मैं इसे हल करने में मदद करना चाहता हूँ। आप इसे कैसे आगे बढ़ाना चाहेंगे?"
-            ),
-            'with_history': (
-                "मैं आपके {loan_type} के बारे में बात कर रहा हूँ। "
-                "हमने आखिरी बार {last_call_date} को बात की थी, और हमारे रिकॉर्ड में अभी भी {due_date} से {amount} रुपये की राशि लंबित दिख रही है। "
-                "मुझे उम्मीद थी कि हम आज कोई समाधान निकाल सकते हैं। स्थिति क्या है?"
+            'current': (
+                "मैं आपके {loan_type} के बारे में बात करने के लिए कॉल कर रही हूं। "
+                "हमारे रिकॉर्ड के अनुसार {amount} रुपये की किस्त {due_date_spoken} को देय थी जो अभी लंबित है। "
+                "मैं इसे हल करने में मदद करना चाहती हूं। आप इसे कैसे आगे बढ़ाना चाहेंगे?"
             ),
             'overdue': (
-                "मैं आपके {loan_type} के बारे में बात करने के लिए कॉल कर रहा हूँ। "
-                "{amount} रुपये का भुगतान {due_date} से ओवरड्यू है। "
-                "मैं समझता हूँ कि चीजें व्यस्त हो सकती हैं, इसलिए मैं मदद के लिए यहाँ हूँ। आप इस भुगतान को कैसे हैंडल करना चाहेंगे?"
+                "मैं आपके {loan_type} के बारे में बात करने के लिए कॉल कर रही हूं। "
+                "{amount} रुपये का भुगतान {due_date_spoken} से ओवरड्यू है। "
+                "मैं समझती हूं कि चीजें व्यस्त हो सकती हैं, इसलिए मैं मदद के लिए यहां हूं। आप इस भुगतान को कैसे हैंडल करना चाहेंगे?"
             )
         }
     }
     
-    # ============================================
-    # CONVERSATION RESPONSES
-    # ============================================
     CONVERSATION_RESPONSES = {
         'en': {
             'WILL_PAY_NOW': [
-                "Excellent, thank you {customer_name}. I'll send a payment link to your registered number right away. Is there anything else I can help with?",
-                "Perfect. I'm sending the payment link to your mobile number now. You should receive it within a minute. Thank you!"
+                "Excellent, thank you {customer_name}. I'll send a payment link to your registered number right away. Please check your messages in the next minute. Is there anything else I can help you with?"
             ],
             'WILL_PAY_LATER': [
-                "Thank you for confirming, {customer_name}. I've noted that you'll make the payment by {commitment_date}. We'll send a payment link shortly. Have a great day!",
-                "I appreciate that. I've scheduled a reminder for {commitment_date}. The payment link will be sent to you. Thank you!"
+                "Thank you for confirming, {customer_name}. I've noted that you'll make the payment by {commitment_date}. We'll send a payment link shortly. Is there anything else you need help with?"
             ],
             'ALREADY_PAID': [
-                "Thank you for letting me know. Let me verify this in our system. Could you please share the transaction reference number if you have it?",
-                "I see. Our records may not have updated yet. Could you tell me when you made the payment and through which method?"
+                "Thank you for letting me know. Let me verify this in our system. Could you please share the transaction reference number if you have it? Otherwise, may I know when and how you made the payment?"
             ],
             'FACING_FINANCIAL_ISSUES': [
-                "I'm really sorry to hear about your situation, {customer_name}. I understand this is difficult. We have options like a payment plan or extension. Would either of these work for you?",
-                "I understand this is a tough time. We can arrange smaller installments or defer this payment. Which option would be more manageable for you?"
+                "I'm really sorry to hear about your situation, {customer_name}. I understand this is difficult. We have options like a payment plan or extension. Would either of these work for you? I'm here to help."
             ],
             'DISPUTE_AMOUNT': [
-                "I see there's a concern about the amount. Let me clarify. Your {loan_type} had an EMI of rupees {amount} due on {due_date}. Does this seem incorrect?",
-                "Thank you for bringing this up. Could you help me understand what amount you were expecting? I'll verify this against our records."
+                "I see there's a concern about the amount. Let me clarify. Your {loan_type} had an EMI of rupees {amount} due on {due_date_spoken}. Does this seem incorrect? I can help you understand the breakdown."
             ],
             'REQUEST_EXTENSION': [
-                "I can definitely help with an extension. We can offer up to {extension_days} days for this payment. Would that work for you?",
-                "Of course. I can process an extension request. How many additional days would you need to make this payment comfortably?"
+                "I can definitely help with an extension. We can offer up to {extension_days} days for this payment. Would that work for you? Let me know if you need more time."
             ],
             'REQUEST_PAYMENT_PLAN': [
-                "Absolutely, we can set up a payment plan. Would you prefer to pay this in two installments or three smaller ones?",
-                "I can arrange that for you. We could split this into manageable amounts. What works better, weekly or monthly installments?"
+                "Absolutely, we can set up a payment plan. Would you prefer to pay this in two installments or three smaller ones? I can arrange whichever works better for you."
             ],
             'DEMANDS_SUPERVISOR': [
-                "I completely understand, {customer_name}. I'll transfer you to a specialist right away. Please hold for just a moment.",
-                "Of course. Let me connect you with my supervisor immediately. One moment please."
+                "I completely understand, {customer_name}. I'll transfer you to a specialist right away. Please hold for just a moment."
             ],
             'POLITE_EXIT': [
-                "Thank you so much for your time, {customer_name}. We'll send you a payment link shortly. Have a wonderful day!",
-                "Perfect, thank you {customer_name}. You'll receive all the details on your registered number. Have a great day!"
+                "Thank you so much for your time, {customer_name}. We'll send you all the details on your registered number shortly. Have a wonderful day. Goodbye."
             ],
             'UNCLEAR': [
-                "I'm sorry, I'm having trouble understanding. You can say 'make payment', 'request help', or 'speak to agent'. What would you like to do?",
-                "Pardon me, I didn't quite catch that. Could you please tell me if you'd like to make a payment, need assistance, or speak with an agent?"
+                "I'm sorry, I'm having trouble understanding. You can say 'make payment', 'request help', or 'speak to agent'. What would you like to do?"
             ]
         },
         'hi': {
             'WILL_PAY_NOW': [
-                "बहुत अच्छा, धन्यवाद {customer_name} जी। मैं आपके रजिस्टर्ड नंबर पर तुरंत पेमेंट लिंक भेज दूंगा। क्या मैं कुछ और मदद कर सकता हूँ?",
-                "परफेक्ट। मैं अभी आपके मोबाइल नंबर पर पेमेंट लिंक भेज रहा हूँ। आपको एक मिनट में मिल जाएगा। धन्यवाद!"
+                "बहुत अच्छा, धन्यवाद {customer_name} जी। मैं आपके रजिस्टर्ड नंबर पर तुरंत पेमेंट लिंक भेज दूंगी। कृपया अगले एक मिनट में अपने मैसेज चेक करें। क्या मैं कुछ और मदद कर सकती हूं?"
             ],
             'WILL_PAY_LATER': [
-                "पुष्टि करने के लिए धन्यवाद, {customer_name} जी। मैंने नोट कर लिया है कि आप {commitment_date} तक भुगतान कर देंगे। हम जल्द ही पेमेंट लिंक भेज देंगे। आपका दिन शुभ हो!",
-                "मैं इसकी सराहना करता हूँ। मैंने {commitment_date} के लिए रिमाइंडर शेड्यूल कर दिया है। पेमेंट लिंक आपको भेज दिया जाएगा। धन्यवाद!"
+                "पुष्टि करने के लिए धन्यवाद, {customer_name} जी। मैंने नोट कर लिया है कि आप {commitment_date} तक भुगतान कर देंगे। हम जल्द ही पेमेंट लिंक भेज देंगे। क्या कोई और मदद चाहिए?"
             ],
             'ALREADY_PAID': [
-                "मुझे बताने के लिए धन्यवाद। मुझे इसे अपने सिस्टम में वेरीफाई करने दें। अगर आपके पास है तो क्या आप ट्रांजेक्शन रेफरेंस नंबर शेयर कर सकते हैं?",
-                "मैं समझा। हो सकता है कि हमारे रिकॉर्ड अभी अपडेट नहीं हुए हों। क्या आप बता सकते हैं कि आपने कब और किस तरीके से भुगतान किया था?"
+                "मुझे बताने के लिए धन्यवाद। मुझे इसे अपने सिस्टम में वेरीफाई करने दें। अगर आपके पास है तो क्या आप ट्रांजेक्शन रेफरेंस नंबर शेयर कर सकते हैं? नहीं तो क्या आप बता सकते हैं कि आपने कब और कैसे भुगतान किया था?"
             ],
             'FACING_FINANCIAL_ISSUES': [
-                "मुझे आपकी स्थिति के बारे में सुनकर बहुत दुख हुआ, {customer_name} जी। मैं समझता हूँ कि यह मुश्किल है। हमारे पास पेमेंट प्लान या एक्सटेंशन जैसे विकल्प हैं। क्या इनमें से कोई आपके लिए काम करेगा?",
-                "मैं समझता हूँ कि यह मुश्किल समय है। हम छोटी किस्तों की व्यवस्था कर सकते हैं या इस भुगतान को टाल सकते हैं। आपके लिए कौन सा विकल्प ज्यादा मैनेजेबल होगा?"
+                "मुझे आपकी स्थिति के बारे में सुनकर बहुत दुख हुआ, {customer_name} जी। मैं समझती हूं कि यह मुश्किल है। हमारे पास पेमेंट प्लान या एक्सटेंशन जैसे विकल्प हैं। क्या इनमें से कोई आपके लिए काम करेगा? मैं मदद के लिए यहां हूं।"
             ],
             'DISPUTE_AMOUNT': [
-                "मैं देख रहा हूँ कि राशि के बारे में चिंता है। मुझे स्पष्ट करने दें। आपके {loan_type} की ईएमआई {amount} रुपये {due_date} को देय थी। क्या यह गलत लग रहा है?",
-                "इसे उठाने के लिए धन्यवाद। क्या आप मुझे समझा सकते हैं कि आप कितनी राशि की उम्मीद कर रहे थे? मैं इसे अपने रिकॉर्ड से वेरीफाई करूंगा।"
+                "मैं देख रही हूं कि राशि के बारे में चिंता है। मुझे स्पष्ट करने दें। आपके {loan_type} की ईएमआई {amount} रुपये {due_date_spoken} को देय थी। क्या यह गलत लग रहा है? मैं आपको ब्रेकडाउन समझा सकती हूं।"
             ],
             'REQUEST_EXTENSION': [
-                "मैं निश्चित रूप से एक्सटेंशन में मदद कर सकता हूँ। हम इस भुगतान के लिए {extension_days} दिनों तक का समय दे सकते हैं। क्या यह आपके लिए काम करेगा?",
-                "बिल्कुल। मैं एक्सटेंशन रिक्वेस्ट प्रोसेस कर सकता हूँ। आपको यह भुगतान आराम से करने के लिए कितने अतिरिक्त दिन चाहिए?"
+                "मैं निश्चित रूप से एक्सटेंशन में मदद कर सकती हूं। हम इस भुगतान के लिए {extension_days} दिनों तक का समय दे सकते हैं। क्या यह आपके लिए काम करेगा? बताइए अगर आपको और समय चाहिए।"
             ],
             'REQUEST_PAYMENT_PLAN': [
-                "बिल्कुल, हम पेमेंट प्लान सेट अप कर सकते हैं। क्या आप इसे दो किस्तों में या तीन छोटी किस्तों में चुकाना पसंद करेंगे?",
-                "मैं आपके लिए यह व्यवस्था कर सकता हूँ। हम इसे मैनेजेबल राशियों में बांट सकते हैं। साप्ताहिक या मासिक किस्त, कौन सा बेहतर काम करेगा?"
+                "बिल्कुल, हम पेमेंट प्लान सेट अप कर सकते हैं। क्या आप इसे दो किस्तों में या तीन छोटी किस्तों में चुकाना पसंद करेंगे? मैं जो भी आपके लिए बेहतर हो वो व्यवस्था कर सकती हूं।"
             ],
             'DEMANDS_SUPERVISOR': [
-                "मैं पूरी तरह से समझता हूँ, {customer_name} जी। मैं आपको तुरंत एक स्पेशलिस्ट से कनेक्ट कर दूंगा। बस एक क्षण रुकें।",
-                "बिल्कुल। मैं आपको तुरंत अपने सुपरवाइजर से कनेक्ट करता हूँ। एक क्षण रुकें।"
+                "मैं पूरी तरह से समझती हूं, {customer_name} जी। मैं आपको तुरंत एक स्पेशलिस्ट से कनेक्ट कर दूंगी। बस एक क्षण रुकें।"
             ],
             'POLITE_EXIT': [
-                "आपके समय के लिए बहुत-बहुत धन्यवाद, {customer_name} जी। हम जल्द ही आपको पेमेंट लिंक भेज देंगे। आपका दिन मंगलमय हो!",
-                "परफेक्ट, धन्यवाद {customer_name} जी। आपको अपने रजिस्टर्ड नंबर पर सभी विवरण मिल जाएंगे। आपका दिन शुभ हो!"
+                "आपके समय के लिए बहुत-बहुत धन्यवाद, {customer_name} जी। हम आपको आपके रजिस्टर्ड नंबर पर जल्द ही सभी विवरण भेज देंगे। आपका दिन शुभ हो। अलविदा।"
             ],
             'UNCLEAR': [
-                "मुझे खेद है, मुझे समझने में परेशानी हो रही है। आप 'पेमेंट करें', 'मदद चाहिए', या 'एजेंट से बात' कह सकते हैं। आप क्या करना चाहेंगे?",
-                "क्षमा करें, मैं ठीक से समझ नहीं पाया। क्या आप बता सकते हैं कि आप पेमेंट करना चाहते हैं, मदद चाहिए, या एजेंट से बात करना चाहते हैं?"
+                "मुझे खेद है, मुझे समझने में परेशानी हो रही है। आप 'पेमेंट करें', 'मदद चाहिए', या 'एजेंट से बात' कह सकते हैं। आप क्या करना चाहेंगे?"
             ]
         }
     }
     
-    # ============================================
-    # SPECIAL MESSAGES
-    # ============================================
     TRANSITION_MESSAGES = {
         'en': {
             'connecting': "Hello, thank you for connecting. Please hold one moment.",
@@ -218,8 +173,8 @@ class MultilingualScriptTemplates:
         },
         'hi': {
             'connecting': "नमस्ते, कनेक्ट करने के लिए धन्यवाद। कृपया एक क्षण रुकें।",
-            'to_emi': "एक क्षण रुकें जब तक मैं आपके अकाउंट की जानकारी निकालता हूँ।",
-            'processing': "कृपया रुकें जब तक मैं इसे प्रोसेस करता हूँ।"
+            'to_emi': "एक क्षण रुकें जब तक मैं आपके अकाउंट की जानकारी निकालती हूं।",
+            'processing': "कृपया रुकें जब तक मैं इसे प्रोसेस करती हूं।"
         }
     }
     
@@ -230,15 +185,74 @@ class MultilingualScriptTemplates:
             "What would you like to do?"
         ),
         'hi': (
-            "मुझे खेद है, मुझे यकीन नहीं है कि मैं समझा। "
+            "मुझे खेद है, मुझे यकीन नहीं है कि मैं समझी। "
             "इसे आसान बनाने के लिए, आप बस 'पेमेंट करें', 'मदद चाहिए', या 'एजेंट से बात' कह सकते हैं। "
             "आप क्या करना चाहेंगे?"
         )
     }
     
-    # ============================================
-    # UTILITY METHODS
-    # ============================================
+    MONTH_NAMES = {
+        'en': {
+            '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+            '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+            '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+        },
+        'hi': {
+            '01': 'जनवरी', '02': 'फरवरी', '03': 'मार्च', '04': 'अप्रैल',
+            '05': 'मई', '06': 'जून', '07': 'जुलाई', '08': 'अगस्त',
+            '09': 'सितंबर', '10': 'अक्टूबर', '11': 'नवंबर', '12': 'दिसंबर'
+        }
+    }
+    
+    @staticmethod
+    def format_date_for_speech(date_str, language='en'):
+        """
+        Convert YYYY-MM-DD to natural speech format.
+        English: "March 15th, 2024"
+        Hindi: "पंद्रह मार्च दो हज़ार चौबीस"
+        
+        Args:
+            date_str: Date in YYYY-MM-DD format
+            language: 'en' or 'hi'
+        """
+        try:
+            parts = date_str.split('-')
+            year = parts[0]
+            month = parts[1]
+            day = int(parts[2])
+            
+            month_name = MultilingualScriptTemplates.MONTH_NAMES[language].get(month, month)
+            
+            if language == 'en':
+                if day in [1, 21, 31]:
+                    day_suffix = 'st'
+                elif day in [2, 22]:
+                    day_suffix = 'nd'
+                elif day in [3, 23]:
+                    day_suffix = 'rd'
+                else:
+                    day_suffix = 'th'
+                
+                return f"{day}{day_suffix} {month_name} {year}"
+            
+            else:
+                hindi_numbers = {
+                    1: 'पहली', 2: 'दो', 3: 'तीन', 4: 'चार', 5: 'पांच',
+                    6: 'छह', 7: 'सात', 8: 'आठ', 9: 'नौ', 10: 'दस',
+                    11: 'ग्यारह', 12: 'बारह', 13: 'तेरह', 14: 'चौदह', 15: 'पंद्रह',
+                    16: 'सोलह', 17: 'सत्रह', 18: 'अठारह', 19: 'उन्नीस', 20: 'बीस',
+                    21: 'इक्कीस', 22: 'बाईस', 23: 'तेईस', 24: 'चौबीस', 25: 'पच्चीस',
+                    26: 'छब्बीस', 27: 'सत्ताईस', 28: 'अट्ठाईस', 29: 'उनतीस', 30: 'तीस', 31: 'इकतीस'
+                }
+                
+                day_spoken = hindi_numbers.get(day, str(day))
+                year_spoken = year
+                
+                return f"{day_spoken} {month_name} {year_spoken}"
+        
+        except:
+            return date_str
+    
     @staticmethod
     def get_time_of_day():
         """Returns appropriate greeting based on time"""
@@ -258,7 +272,6 @@ class MultilingualScriptTemplates:
         if len(amount_str) <= 3:
             return amount_str
         
-        # Indian numbering: 15,000
         formatted = ""
         for i, digit in enumerate(reversed(amount_str)):
             if i == 3 or (i > 3 and (i - 3) % 2 == 0):
@@ -289,7 +302,7 @@ class MultilingualScriptTemplates:
             )
         elif script_type == 'emi':
             return MultilingualScriptTemplates.get_emi_script(
-                language, kwargs.get('customer_data'), kwargs.get('has_history', False)
+                language, kwargs.get('customer_data')
             )
         elif script_type == 'conversation':
             return MultilingualScriptTemplates.get_conversation_response(
@@ -329,15 +342,15 @@ class MultilingualScriptTemplates:
         return template.format(bank_name=bank_name, customer_name=customer_name)
     
     @staticmethod
-    def get_emi_script(language, customer_data, has_history=False):
+    def get_emi_script(language, customer_data):
         """Get EMI presentation script in specified language"""
         amount = MultilingualScriptTemplates.format_amount(
             customer_data['bank_details']['pending_emi_amount'], language
         )
         due_date = customer_data['bank_details']['due_date']
+        due_date_spoken = MultilingualScriptTemplates.format_date_for_speech(due_date, language)
         loan_type = customer_data['bank_details']['loan_type']
         
-        # Check if overdue
         from datetime import datetime
         due = datetime.strptime(due_date, "%Y-%m-%d")
         is_overdue = due < datetime.now()
@@ -346,20 +359,14 @@ class MultilingualScriptTemplates:
         
         if is_overdue:
             template = scripts['overdue']
-        elif has_history:
-            template = scripts['with_history']
-            call_history = customer_data.get('call_history', [])
-            if len(call_history) > 1:
-                last_call = call_history[-2]
-                last_call_date = last_call.get('timestamp', '')[:10]
-                return template.format(
-                    loan_type=loan_type, amount=amount,
-                    due_date=due_date, last_call_date=last_call_date
-                )
         else:
-            template = scripts['first_time']
+            template = scripts['current']
         
-        return template.format(loan_type=loan_type, amount=amount, due_date=due_date)
+        return template.format(
+            loan_type=loan_type, 
+            amount=amount, 
+            due_date_spoken=due_date_spoken
+        )
     
     @staticmethod
     def get_conversation_response(language, intent, customer_data, context=None, variation=0):
@@ -369,13 +376,17 @@ class MultilingualScriptTemplates:
         )
         template = responses[variation % len(responses)]
         
+        due_date_spoken = MultilingualScriptTemplates.format_date_for_speech(
+            customer_data['bank_details']['due_date'], language
+        )
+        
         variables = {
             'customer_name': customer_data.get('name'),
             'loan_type': customer_data['bank_details']['loan_type'],
             'amount': MultilingualScriptTemplates.format_amount(
                 customer_data['bank_details']['pending_emi_amount'], language
             ),
-            'due_date': customer_data['bank_details']['due_date'],
+            'due_date_spoken': due_date_spoken,
             'extension_days': '15',
             'commitment_date': context.get('commitment_date', 
                 'the agreed date' if language == 'en' else 'सहमत तारीख') if context else (
