@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from models.customer import Customer
 from services.gemini_service import GeminiService
@@ -9,6 +9,8 @@ import uuid
 import os
 import requests
 from config import Config
+from services.google_tts_service import google_tts_service
+import base64
 
 call_bp = Blueprint('call', __name__)
 gemini_service = GeminiService()
@@ -75,6 +77,25 @@ def initiate_call():
         print(f"Error in initiate_call: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@call_bp.route('/tts-audio/<filename>', methods=['GET'])
+def serve_tts_audio(filename):
+    """Serve Google TTS audio files"""
+    try:
+        filepath = os.path.join('tts_cache', filename)
+        
+        if not os.path.exists(filepath):
+            print(f"[ERROR] Audio file not found: {filepath}")
+            return '', 404
+        
+        return send_file(
+            filepath,
+            mimetype='audio/mpeg',
+            as_attachment=False
+        )
+    
+    except Exception as e:
+        print(f"[ERROR] Failed to serve audio: {str(e)}")
+        return '', 500
 
 @call_bp.route('/handle-answer', methods=['POST'])
 def handle_answer():

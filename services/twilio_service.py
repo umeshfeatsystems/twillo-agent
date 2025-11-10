@@ -2,17 +2,21 @@ from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Gather, Dial
 from config import Config
 from language_config import LanguageConfig
+from services.google_tts_service import google_tts_service
 import uuid
+import os
+import base64
 
 class TwilioService:
     def __init__(self):
         self.client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         self.from_number = Config.TWILIO_PHONE_NUMBER
+        self.use_google_tts = google_tts_service.client is not None
         
-        self.PROSODY_RATE = '95%'
+        if not os.path.exists('tts_cache'):
+            os.makedirs('tts_cache')
     
     def initiate_call(self, to_number, customer_id):
-        """Initiate an outbound call"""
         try:
             call_ref = f"CALL-{uuid.uuid4().hex[:8].upper()}"
             
@@ -56,40 +60,48 @@ class TwilioService:
             }
     
     def _normalize_script_for_tts(self, text):
-        """Normalize script for consistent TTS"""
         text = ' '.join(text.split())
         if text and text[-1] not in '.!?':
             text += '.'
         return text
     
+    def _save_audio_file(self, audio_base64, filename):
+        """Save audio to file and return URL"""
+        try:
+            audio_bytes = base64.b64decode(audio_base64)
+            filepath = os.path.join('tts_cache', filename)
+            
+            with open(filepath, 'wb') as f:
+                f.write(audio_bytes)
+            
+            audio_url = f"{Config.BASE_URL}/api/call/tts-audio/{filename}"
+            return audio_url
+        except Exception as e:
+            print(f"Error saving audio file: {e}")
+            return None
+    
     def _create_say_element(self, response, text, language='en'):
-        """
-        Create <Say> element with language-specific voice.
-        
-        Args:
-            response: VoiceResponse or Gather object
-            text: Text to speak
-            language: 'en' or 'hi'
-        """
         normalized_text = self._normalize_script_for_tts(text)
         lang_config = LanguageConfig.get_language_config(language)
         
-        ssml_text = f'<speak><prosody rate="{self.PROSODY_RATE}">{normalized_text}</prosody></speak>'
+        if self.use_google_tts:
+            audio_base64 = google_tts_service.synthesize_speech(normalized_text, language)
+            if audio_base64:
+                filename = f"{uuid.uuid4().hex}.mp3"
+                audio_url = self._save_audio_file(audio_base64, filename)
+                if audio_url:
+                    print(f"[GOOGLE TTS] Playing audio: {audio_url}")
+                    response.play(audio_url)
+                    return
         
+        print(f"[FALLBACK] Using Twilio voice for: {normalized_text[:50]}...")
         response.say(
-            ssml_text,
-            voice=lang_config['voice'],
+            normalized_text,
+            voice=lang_config['twilio_voice'],
             language=lang_config['locale']
         )
     
     def generate_language_selection_twiml(self, customer_id, is_repeat=False):
-        """
-        Generate IVR menu for language selection.
-        
-        Args:
-            customer_id: Customer ID
-            is_repeat: If True, use shorter repeat message
-        """
         response = VoiceResponse()
         
         gather = Gather(
@@ -106,28 +118,28 @@ class TwilioService:
         else:
             message = LanguageConfig.IVR_WELCOME_MESSAGE
         
-        ssml_message = f'<speak><prosody rate="85%">{message}</prosody></speak>'
-        
-        gather.say(
-            ssml_message,
-            voice='Polly.Aditi',
-            language='hi-IN'
-        )
+        if self.use_google_tts:
+            audio_base64 = google_tts_service.synthesize_speech(message, 'hi')
+            if audio_base64:
+                filename = f"ivr_{uuid.uuid4().hex}.mp3"
+                audio_url = self._save_audio_file(audio_base64, filename)
+                if audio_url:
+                    print(f"[GOOGLE TTS] IVR audio: {audio_url}")
+                    gather.play(audio_url)
+                else:
+                    gather.say(message, voice='Polly.Aditi', language='hi-IN')
+            else:
+                gather.say(message, voice='Polly.Aditi', language='hi-IN')
+        else:
+            gather.say(message, voice='Polly.Aditi', language='hi-IN')
         
         response.append(gather)
-        
-        response.redirect(
-            f'{Config.BASE_URL}/api/call/language-selected?customer_id={customer_id}',
-            method='POST'
-        )
+        response.redirect(f'{Config.BASE_URL}/api/call/language-selected?customer_id={customer_id}', method='POST')
         
         print(f"[TWILIO] Generated language selection TwiML")
         return str(response)
     
     def generate_initial_twiml(self, script_text, customer_id, language='en'):
-        """
-        Generate TwiML for initial greeting with language support.
-        """
         response = VoiceResponse()
         
         lang_config = LanguageConfig.get_language_config(language)
@@ -147,16 +159,12 @@ class TwilioService:
         self._create_say_element(gather, script_text, language)
         response.append(gather)
         
-        response.redirect(
-            f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
-            method='POST'
-        )
+        response.redirect(f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}', method='POST')
         
         print(f"[TWILIO] Generated initial TwiML in {language}")
         return str(response)
     
     def generate_followup_twiml(self, followup_text, customer_id, language='en'):
-        """Generate TwiML for follow-up responses"""
         response = VoiceResponse()
         
         lang_config = LanguageConfig.get_language_config(language)
@@ -176,16 +184,12 @@ class TwilioService:
         self._create_say_element(gather, followup_text, language)
         response.append(gather)
         
-        response.redirect(
-            f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
-            method='POST'
-        )
+        response.redirect(f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}', method='POST')
         
         print(f"[TWILIO] Generated followup TwiML in {language}")
         return str(response)
     
     def generate_goodbye_twiml(self, text, language='en'):
-        """Generate TwiML to end call"""
         response = VoiceResponse()
         self._create_say_element(response, text, language)
         response.hangup()
@@ -193,13 +197,11 @@ class TwilioService:
         return str(response)
     
     def generate_hangup_for_machine_twiml(self):
-        """Generate TwiML for answering machine detection"""
         response = VoiceResponse()
         response.hangup()
         return str(response)
     
     def generate_transfer_twiml(self, text, language='en'):
-        """Generate TwiML to transfer call"""
         response = VoiceResponse()
         
         self._create_say_element(response, text, language)
@@ -230,10 +232,6 @@ class TwilioService:
         return str(response)
     
     def generate_say_and_redirect_twiml(self, text, redirect_url, language='en'):
-        """
-        Generate TwiML to say a message and redirect.
-        Used for fast webhooks.
-        """
         response = VoiceResponse()
         self._create_say_element(response, text, language)
         response.redirect(redirect_url, method='POST')
