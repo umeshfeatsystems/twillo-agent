@@ -6,7 +6,6 @@ class LanguageConfig:
             'locale': 'en-IN',
             'google_voice': 'en-IN-Wavenet-D',
             'google_language': 'en-IN',
-            'twilio_voice': 'Polly.Aditi',
             'stt_language': 'en-IN',
             'speech_hints': (
                 'yes, no, speaking, payment, pay, tomorrow, today, later, '
@@ -20,7 +19,6 @@ class LanguageConfig:
             'locale': 'hi-IN',
             'google_voice': 'hi-IN-Wavenet-D',
             'google_language': 'hi-IN',
-            'twilio_voice': 'Polly.Aditi',
             'stt_language': 'hi-IN',
             'speech_hints': (
                 'हां, नहीं, बोल रहा हूं, भुगतान, पे करूंगा, कल, आज, '
@@ -68,11 +66,13 @@ class LanguageConfig:
     
     @staticmethod
     def get_voice(language_code):
+        """Get Google Cloud TTS voice name"""
         config = LanguageConfig.get_language_config(language_code)
         return config['google_voice']
     
     @staticmethod
     def get_stt_config(language_code):
+        """Get speech-to-text configuration"""
         config = LanguageConfig.get_language_config(language_code)
         return {
             'language': config['stt_language'],

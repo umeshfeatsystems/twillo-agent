@@ -37,8 +37,11 @@ class Config:
         if not Config.MONGODB_URI:
             errors.append("MONGODB_URI is not set")
         
+        # CRITICAL: Google Cloud credentials are now REQUIRED
         if not Config.GOOGLE_APPLICATION_CREDENTIALS:
-            errors.append("WARNING: GOOGLE_APPLICATION_CREDENTIALS is not set. TTS will fallback to Twilio voices.")
+            errors.append("CRITICAL: GOOGLE_APPLICATION_CREDENTIALS is not set. This is REQUIRED.")
+        elif not os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
+            errors.append(f"CRITICAL: Google Cloud credentials file not found at: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
         
         if Config.BASE_URL == 'http://localhost:5000':
             errors.append("WARNING: BASE_URL is set to localhost. Twilio webhooks won't work! Use ngrok for testing.")
@@ -62,5 +65,14 @@ class Config:
         print(f"Base URL: {Config.BASE_URL}")
         print(f"Machine Detection: {Config.MACHINE_DETECTION}")
         print(f"Recording: {'Enabled' if Config.ENABLE_RECORDING else 'Disabled'}")
-        print(f"Google TTS: {'✓ Enabled' if Config.GOOGLE_APPLICATION_CREDENTIALS else '✗ Using Twilio voices'}")
+        
+        # Enhanced Google TTS status
+        if Config.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
+            print(f"Google TTS: ✓ ENABLED (credentials found)")
+            print(f"Credentials: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
+        else:
+            print(f"Google TTS: ✗ CRITICAL ERROR - Credentials missing or invalid")
+            if Config.GOOGLE_APPLICATION_CREDENTIALS:
+                print(f"Expected path: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
+        
         print("="*60 + "\n")
