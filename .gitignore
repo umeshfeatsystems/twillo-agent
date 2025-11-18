@@ -97,8 +97,11 @@ venv.bak/
 dmypy.json
 # Pyre type checker
 .pyre/
-
-
+credentials
+data
+test_credentials.py
+test_available_models.py
+tts_cache
 
 
 

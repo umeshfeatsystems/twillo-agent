@@ -21,7 +21,6 @@ if not os.path.exists('data'):
 
 @call_bp.route('/initiate', methods=['POST'])
 def initiate_call():
-    """Endpoint to initiate a call to a customer"""
     try:
         data = request.get_json()
         customer_id = data.get('customer_id')
@@ -53,10 +52,11 @@ def initiate_call():
                 'conversation_history': [], 
                 'duration': 0,
                 'recording_url': None,
-                'call_state': 'LANGUAGE_SELECTION',
-                'language': None,
+                'call_state': 'CONNECTING',
+                'language': Config.DEFAULT_LANGUAGE,
                 'transfer_attempted': False,
-                'unclear_count': 0
+                'unclear_count': 0,
+                'context': {}
             }
             
             Customer.update_call_history(customer_id, call_record)
@@ -65,7 +65,8 @@ def initiate_call():
                 'success': True,
                 'message': f"Call initiated to {customer['name']}",
                 'call_sid': call_result['call_sid'],
-                'call_ref': call_result['call_ref']
+                'call_ref': call_result['call_ref'],
+                'language': Config.DEFAULT_LANGUAGE
             }), 200
         else:
             return jsonify({
@@ -79,7 +80,6 @@ def initiate_call():
 
 @call_bp.route('/tts-audio/<filename>', methods=['GET'])
 def serve_tts_audio(filename):
-    """Serve Google TTS audio files"""
     try:
         filepath = os.path.join('tts_cache', filename)
         
@@ -99,7 +99,6 @@ def serve_tts_audio(filename):
 
 @call_bp.route('/handle-answer', methods=['POST'])
 def handle_answer():
-    """Webhook when customer answers - present IVR language menu"""
     try:
         call_sid = request.form.get('CallSid')
         answered_by = request.form.get('AnsweredBy', 'human')
@@ -117,10 +116,12 @@ def handle_answer():
             twiml = twilio_service.generate_hangup_for_machine_twiml()
             return twiml, 200, {'Content-Type': 'text/xml'}
 
-        print("[DEBUG] Presenting language selection menu")
-        twiml = twilio_service.generate_language_selection_twiml(customer_id)
+        redirect_url = f"{Config.BASE_URL}/api/call/generate-greeting?customer_id={customer_id}"
         
-        return twiml, 200, {'Content-Type': 'text/xml'}
+        response = VoiceResponse()
+        response.redirect(redirect_url, method='POST')
+        
+        return str(response), 200, {'Content-Type': 'text/xml'}
     
     except Exception as e:
         print(f"Error in handle_answer: {str(e)}")
@@ -131,68 +132,8 @@ def handle_answer():
         response.hangup()
         return str(response), 200, {'Content-Type': 'text/xml'}
 
-
-@call_bp.route('/language-selected', methods=['POST'])
-def language_selected():
-    """Handle language selection from IVR menu"""
-    try:
-        customer_id = request.args.get('customer_id')
-        call_sid = request.form.get('CallSid')
-        digits = request.form.get('Digits', '')
-        
-        print(f"[DEBUG] language-selected: customer_id={customer_id}, digits='{digits}'")
-        
-        language = LanguageConfig.get_language_from_digit(digits)
-        
-        if not language:
-            print(f"[DEBUG] Invalid language selection: {digits}")
-            twiml = twilio_service.generate_language_selection_twiml(
-                customer_id, 
-                is_repeat=True
-            )
-            return twiml, 200, {'Content-Type': 'text/xml'}
-        
-        print(f"[DEBUG] Language selected: {language}")
-        
-        collection = Customer.get_collection()
-        collection.update_one(
-            {'call_history.call_id': call_sid},
-            {
-                '$set': {
-                    'call_history.$.language': language,
-                    'call_history.$.call_state': 'CONNECTING'
-                }
-            }
-        )
-        
-        transition_text = (
-            "Thank you. Please hold one moment." if language == 'en' else
-            "धन्यवाद। कृपया एक क्षण रुकें।"
-        )
-        
-        redirect_url = f"{Config.BASE_URL}/api/call/generate-greeting?customer_id={customer_id}"
-        
-        twiml = twilio_service.generate_say_and_redirect_twiml(
-            transition_text,
-            redirect_url,
-            language=language
-        )
-        
-        return twiml, 200, {'Content-Type': 'text/xml'}
-    
-    except Exception as e:
-        print(f"Error in language_selected: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        response = VoiceResponse()
-        response.say("Technical error. कृपया दोबारा कॉल करें। Please call again.")
-        response.hangup()
-        return str(response), 200, {'Content-Type': 'text/xml'}
-
-
 @call_bp.route('/generate-greeting', methods=['POST'])
 def generate_greeting():
-    """Generate verification script in the customer's selected language"""
     try:
         customer_id = request.args.get('customer_id')
         call_sid = request.form.get('CallSid')
@@ -213,7 +154,7 @@ def generate_greeting():
                 call_record = call
                 break
         
-        language = call_record.get('language', 'en') if call_record else 'en'
+        language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
         print(f"[DEBUG] Using language: {language}")
         
         script = gemini_service.generate_verification_script(
@@ -253,10 +194,8 @@ def generate_greeting():
         response.hangup()
         return str(response), 200, {'Content-Type': 'text/xml'}
 
-
 @call_bp.route('/process-response', methods=['POST'])
 def process_response():
-    """Process customer speech with language-aware handling"""
     try:
         customer_id = request.args.get('customer_id')
         call_sid = request.form.get('CallSid')
@@ -283,10 +222,11 @@ def process_response():
             response.hangup()
             return str(response), 200, {'Content-Type': 'text/xml'}
 
-        language = call_record.get('language', 'en')
+        language = call_record.get('language', Config.DEFAULT_LANGUAGE)
         current_call_state = call_record.get('call_state', 'CONVERSATION')
         conversation_history = call_record.get('conversation_history', [])
         unclear_count = call_record.get('unclear_count', 0)
+        stored_context = call_record.get('context', {})
         
         print(f"[DEBUG] Language: {language}, State: {current_call_state}")
         
@@ -304,13 +244,13 @@ def process_response():
                 twiml = twilio_service.generate_transfer_twiml(
                     "I'm having trouble hearing you. Let me connect you with a specialist." 
                     if language == 'en' else 
-                    "मुझे आपको सुनने में परेशानी हो रही है। मैं आपको एक स्पेशलिस्ट से कनेक्ट करती हूं।",
+                    "मुझे आपको सुनने में प्रॉब्लम हो रही है। मैं आपको एक स्पेशलिस्ट से कनेक्ट करती हूं।",
                     language
                 )
             else:
                 reprompt = (
                     "I'm sorry, I didn't catch that. Could you please repeat?" if language == 'en' else 
-                    "मुझे खेद है, मैं समझ नहीं पाई। क्या आप दोहरा सकते हैं?"
+                    "सॉरी, मुझे समझ नहीं आया। क्या आप दोहरा सकते हैं?"
                 )
                 twiml = twilio_service.generate_followup_twiml(reprompt, customer_id, language)
             return twiml, 200, {'Content-Type': 'text/xml'}
@@ -330,7 +270,7 @@ def process_response():
                 next_state = 'PRESENTING_DETAILS'
                 transition = (
                     "One moment while I pull up your account details." if language == 'en' else 
-                    "एक क्षण रुकें जब तक मैं आपके अकाउंट की जानकारी निकालती हूं।"
+                    "एक मोमेंट रुकें जब तक मैं आपके अकाउंट की डिटेल्स निकालती हूं।"
                 )
                 redirect_url = f"{Config.BASE_URL}/api/call/present-details?customer_id={customer_id}"
                 twiml = twilio_service.generate_say_and_redirect_twiml(
@@ -377,6 +317,10 @@ def process_response():
             followup_text = bot_decision.get('polite_bot_response')
             intent = bot_decision.get('intent', 'UNCLEAR')
             should_transfer = bot_decision.get('should_transfer', False)
+            response_context = bot_decision.get('context', {})
+            
+            # Merge contexts
+            stored_context.update(response_context)
             
             if intent == 'UNCLEAR':
                 unclear_count += 1
@@ -390,7 +334,8 @@ def process_response():
                 'intent': intent,
                 'state_transition': f"{current_call_state} -> {next_state}",
                 'should_transfer': should_transfer,
-                'language': language
+                'language': language,
+                'context': response_context
             }
             
             update_data = {
@@ -398,7 +343,8 @@ def process_response():
                 '$set': {
                     'call_history.$.call_state': next_state,
                     'call_history.$.outcome': intent,
-                    'call_history.$.unclear_count': unclear_count
+                    'call_history.$.unclear_count': unclear_count,
+                    'call_history.$.context': stored_context
                 }
             }
             
@@ -416,7 +362,7 @@ def process_response():
             else:
                 twiml = twilio_service.generate_goodbye_twiml(
                     "Thank you for your time. Goodbye." if language == 'en' else 
-                    "आपके समय के लिए धन्यवाद। अलविदा।",
+                    "आपके टाइम के लिए थैंक्यू। अलविदा।",
                     language
                 )
 
@@ -427,7 +373,7 @@ def process_response():
             response = VoiceResponse()
             response.say(
                 "An unexpected error occurred." if language == 'en' else 
-                "एक अप्रत्याशित त्रुटि हुई।"
+                "एक अनएक्सपेक्टेड एरर हुई।"
             )
             response.hangup()
             return str(response), 200, {'Content-Type': 'text/xml'}
@@ -441,10 +387,8 @@ def process_response():
         response.hangup()
         return str(response), 200, {'Content-Type': 'text/xml'}
 
-
 @call_bp.route('/present-details', methods=['POST'])
 def present_details():
-    """Present EMI details in customer's language"""
     try:
         customer_id = request.args.get('customer_id')
         call_sid = request.form.get('CallSid')
@@ -464,7 +408,7 @@ def present_details():
                 call_record = call
                 break
         
-        language = call_record.get('language', 'en') if call_record else 'en'
+        language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
         
         emi_script = gemini_service.generate_emi_details_script(customer, language)
         
@@ -503,10 +447,8 @@ def present_details():
         )
         return str(response), 200, {'Content-Type': 'text/xml'}
 
-
 @call_bp.route('/handle-recording', methods=['POST'])
 def handle_recording():
-    """Receive call recording URL"""
     try:
         call_sid = request.form.get('CallSid')
         recording_url = request.form.get('RecordingUrl')
@@ -546,10 +488,8 @@ def handle_recording():
         print(f"Error in handle_recording: {str(e)}")
         return '', 200
 
-
 @call_bp.route('/status', methods=['POST'])
 def call_status():
-    """Receive call status updates"""
     try:
         call_sid = request.form.get('CallSid')
         call_status = request.form.get('CallStatus')
@@ -572,10 +512,8 @@ def call_status():
         print(f"Error in call_status: {str(e)}")
         return '', 200
 
-
 @call_bp.route('/handle-transfer-status', methods=['POST'])
 def handle_transfer_status():
-    """Handle transfer completion"""
     try:
         call_sid = request.form.get('CallSid')
         dial_status = request.form.get('DialCallStatus')
@@ -605,10 +543,8 @@ def handle_transfer_status():
         response.hangup()
         return str(response), 200, {'Content-Type': 'text/xml'}
 
-
 @call_bp.route('/customers/<customer_id>', methods=['GET'])
 def get_customer(customer_id):
-    """Get customer details"""
     try:
         customer = Customer.find_by_id(customer_id)
         if not customer:
@@ -618,10 +554,8 @@ def get_customer(customer_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @call_bp.route('/customers/<customer_id>/call-history', methods=['GET'])
 def get_call_history(customer_id):
-    """Get call history with language info"""
     try:
         customer = Customer.find_by_id(customer_id)
         if not customer:
@@ -639,11 +573,12 @@ def get_call_history(customer_id):
                 'duration': call.get('duration'),
                 'outcome': call.get('outcome'),
                 'call_state': call.get('call_state'),
-                'language': call.get('language', 'en'),
+                'language': call.get('language', Config.DEFAULT_LANGUAGE),
                 'transfer_attempted': call.get('transfer_attempted', False),
                 'unclear_count': call.get('unclear_count', 0),
                 'conversation_turns': len(call.get('conversation_history', [])),
-                'conversation_history': call.get('conversation_history', [])
+                'conversation_history': call.get('conversation_history', []),
+                'context': call.get('context', {})
             }
             formatted_history.append(formatted_call)
         

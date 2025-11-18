@@ -17,6 +17,7 @@ class Config:
     ENABLE_RECORDING = os.getenv('ENABLE_RECORDING', 'true').lower() == 'true'
     MAX_CALL_DURATION = int(os.getenv('MAX_CALL_DURATION', '600'))
     GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+    DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'en')  # NEW: Set default language
     
     @staticmethod
     def validate():
@@ -37,11 +38,13 @@ class Config:
         if not Config.MONGODB_URI:
             errors.append("MONGODB_URI is not set")
         
-        # CRITICAL: Google Cloud credentials are now REQUIRED
         if not Config.GOOGLE_APPLICATION_CREDENTIALS:
             errors.append("CRITICAL: GOOGLE_APPLICATION_CREDENTIALS is not set. This is REQUIRED.")
         elif not os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
             errors.append(f"CRITICAL: Google Cloud credentials file not found at: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
+        
+        if Config.DEFAULT_LANGUAGE not in ['en', 'hi']:
+            errors.append(f"WARNING: DEFAULT_LANGUAGE must be 'en' or 'hi'. Current: {Config.DEFAULT_LANGUAGE}")
         
         if Config.BASE_URL == 'http://localhost:5000':
             errors.append("WARNING: BASE_URL is set to localhost. Twilio webhooks won't work! Use ngrok for testing.")
@@ -65,8 +68,8 @@ class Config:
         print(f"Base URL: {Config.BASE_URL}")
         print(f"Machine Detection: {Config.MACHINE_DETECTION}")
         print(f"Recording: {'Enabled' if Config.ENABLE_RECORDING else 'Disabled'}")
+        print(f"Default Language: {Config.DEFAULT_LANGUAGE}")
         
-        # Enhanced Google TTS status
         if Config.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
             print(f"Google TTS: ✓ ENABLED (credentials found)")
             print(f"Credentials: {Config.GOOGLE_APPLICATION_CREDENTIALS}")

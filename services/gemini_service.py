@@ -4,6 +4,7 @@ from multilingual_script_templates import MultilingualScriptTemplates
 from language_config import LanguageConfig
 import json
 import re
+from datetime import datetime, timedelta
 
 class GeminiService:
     def __init__(self):
@@ -36,6 +37,7 @@ class GeminiService:
                 r'\b(अभी|आज|तुरंत|अब).*?(भुगतान|पे|देंगे|करेंगे|कर रही|कर रहा|भर रही|भर रहा)',
                 r'\b(payment|pay).*?(abhi|aaj|turant|kar|dunga|dungi|rahi|raha)',
                 r'\b(हां|हा|जी).*?(भुगतान|payment|pay|कर|भर)',
+                r'\b(मै|मैं).*?(भर|pay).*?(दूँगी|दूंगा)',
             ],
             'WILL_PAY_LATER': [
                 r'\b(कल|बाद में|जल्द).*?(भुगतान|पे|देंगे)',
@@ -49,7 +51,6 @@ class GeminiService:
         }
     
     def _match_intent_heuristic(self, text, language='en'):
-        """Pattern-based intent matching as fallback"""
         text_lower = text.lower().strip()
         patterns = self.INTENT_PATTERNS_EN if language == 'en' else self.INTENT_PATTERNS_HI
         
@@ -60,8 +61,31 @@ class GeminiService:
         
         return None, 0.0
     
+    def _extract_date_commitment(self, text, language='en'):
+        """Extract date/time commitment from user response"""
+        text_lower = text.lower().strip()
+        
+        # Extract number of days
+        days_pattern = r'(\d+)\s*(day|days|din)'
+        match = re.search(days_pattern, text_lower)
+        if match:
+            num_days = int(match.group(1))
+            commitment_date = datetime.now() + timedelta(days=num_days)
+            return commitment_date, num_days
+        
+        # Tomorrow
+        if any(word in text_lower for word in ['tomorrow', 'kal', 'कल']):
+            commitment_date = datetime.now() + timedelta(days=1)
+            return commitment_date, 1
+        
+        # Next week
+        if any(phrase in text_lower for phrase in ['next week', 'agle hafte', 'अगले हफ्ते']):
+            commitment_date = datetime.now() + timedelta(days=7)
+            return commitment_date, 7
+        
+        return None, None
+    
     def generate_verification_script(self, customer_data, bank_name, language='en'):
-        """Generate verification script in specified language"""
         script = MultilingualScriptTemplates.get_verification_script(
             language=language,
             bank_name=bank_name,
@@ -72,14 +96,6 @@ class GeminiService:
         return script
     
     def analyze_verification(self, customer_response, customer_data, language='en'):
-        """
-        Analyze verification response with multi-lingual support.
-        
-        Args:
-            customer_response: Customer's speech
-            customer_data: Customer details
-            language: 'en' or 'hi'
-        """
         print(f"[GEMINI/VERIFICATION/{language.upper()}] Analyzing: '{customer_response}'")
         
         response_lower = customer_response.lower().strip()
@@ -89,7 +105,7 @@ class GeminiService:
             negative_words = ['no', 'wrong', 'not me', 'incorrect', 'nahi', 'nai']
             not_interested = ['not interested', 'stop calling', "don't call", 'mat karo']
         else:
-            positive_words = ['हां', 'हा', 'जी', 'बोल रहा', 'बोल रही', 'yes', 'ha', 'haan', 'main hoon', 'मैं हूं']
+            positive_words = ['हां', 'हा', 'जी', 'बोल रहा', 'बोल रही', 'yes', 'ha', 'haan', 'main hoon', 'मैं हूं', 'रेडी']
             negative_words = ['नहीं', 'गलत', 'नहीं', 'no', 'nahi', 'galat', 'nai']
             not_interested = ['रुचि नहीं', 'call mat', 'बंद करो', 'not interested', 'mat karo']
         
@@ -150,7 +166,6 @@ Examples:
         }
     
     def generate_emi_details_script(self, customer_data, language='en'):
-        """Generate EMI script in specified language"""
         script = MultilingualScriptTemplates.get_emi_script(
             language, customer_data
         )
@@ -159,17 +174,10 @@ Examples:
     
     def get_bot_response(self, call_state, customer_response, customer_data, 
                         conversation_history, language='en'):
-        """
-        Enhanced NLU with multi-lingual support and proper conversation continuation.
-        
-        Args:
-            call_state: Current call state
-            customer_response: Customer's speech
-            customer_data: Customer details
-            conversation_history: Conversation history
-            language: 'en' or 'hi'
-        """
         print(f"[GEMINI/NLU/{language.upper()}] State={call_state}, Input='{customer_response}'")
+        
+        # Extract date commitment if present
+        commitment_date, num_days = self._extract_date_commitment(customer_response, language)
         
         heuristic_intent, confidence = self._match_intent_heuristic(customer_response, language)
         
@@ -177,14 +185,15 @@ Examples:
             print(f"[HEURISTIC/{language.upper()}] Matched: {heuristic_intent}")
             return self._build_response(
                 heuristic_intent, call_state, customer_data,
-                conversation_history, customer_response, language
+                conversation_history, customer_response, language,
+                commitment_date=commitment_date, num_days=num_days
             )
         
         history_str = self._build_conversation_context(conversation_history, language)
         unclear_count = sum(1 for t in conversation_history if t.get('intent') == 'UNCLEAR')
         
         if language == 'en':
-            prompt = f"""You are an NLU engine for EMI recovery. Classify customer intent.
+            prompt = f"""You are an NLU engine for EMI recovery. Classify customer intent and extract commitment details.
 
 Customer: {customer_data['name']}
 Loan: {customer_data['bank_details']['loan_type']}
@@ -202,14 +211,12 @@ Intents: WILL_PAY_NOW, WILL_PAY_LATER, ALREADY_PAID, FACING_FINANCIAL_ISSUES,
 DISPUTE_AMOUNT, REQUEST_EXTENSION, REQUEST_PAYMENT_PLAN, DEMANDS_SUPERVISOR, 
 POLITE_EXIT, ANGRY_ABUSIVE, CONFUSION_WRONG_PERSON, SMALL_TALK, UNCLEAR
 
-Consider variations like: "yes paying now", "ok will pay", "haan kar raha", "abhi kar rahi", etc.
+If customer says "No", "Nothing else", "That's all", classify as POLITE_EXIT.
 
 Return JSON:
 {{
     "intent": "classified_intent",
-    "confidence": 0.0-1.0,
-    "next_state": "state",
-    "should_transfer": false
+    "confidence": 0.0-1.0
 }}"""
         
         else:
@@ -227,21 +234,19 @@ Return JSON:
 
 ग्राहक की प्रतिक्रिया: "{customer_response}"
 
-इरादे: WILL_PAY_NOW (अभी भुगतान करेंगे), WILL_PAY_LATER (बाद में भुगतान करेंगे), 
-ALREADY_PAID (पहले ही भुगतान किया), FACING_FINANCIAL_ISSUES (वित्तीय समस्याएं), 
+इरादे: WILL_PAY_NOW (अभी पेमेंट करेंगे), WILL_PAY_LATER (बाद में पेमेंट करेंगे), 
+ALREADY_PAID (पहले ही पेमेंट किया), FACING_FINANCIAL_ISSUES (वित्तीय समस्याएं), 
 DISPUTE_AMOUNT (राशि विवाद), REQUEST_EXTENSION (समय बढ़ाने की मांग), 
-REQUEST_PAYMENT_PLAN (भुगतान योजना), DEMANDS_SUPERVISOR (सुपरवाइजर से बात), 
-POLITE_EXIT (विनम्र बाहर निकलना), ANGRY_ABUSIVE (गुस्सा/अपमानजनक), 
+REQUEST_PAYMENT_PLAN (पेमेंट प्लान), DEMANDS_SUPERVISOR (सुपरवाइजर से बात), 
+POLITE_EXIT (विनम्र बाहर निकलना / नहीं, बस इतना ही), ANGRY_ABUSIVE (गुस्सा/अपमानजनक), 
 CONFUSION_WRONG_PERSON (गलत व्यक्ति), SMALL_TALK (छोटी बातचीत), UNCLEAR (अस्पष्ट)
 
-विविधताओं पर विचार करें: "हां भर रही", "अभी कर रहा", "ठीक है पे करूंगा", आदि।
+अगर ग्राहक कहता है "नहीं", "कुछ नहीं", "बस", तो इसे POLITE_EXIT मानें।
 
 JSON लौटाएं:
 {{
     "intent": "classified_intent",
-    "confidence": 0.0-1.0,
-    "next_state": "state",
-    "should_transfer": false
+    "confidence": 0.0-1.0
 }}"""
         
         try:
@@ -262,8 +267,12 @@ JSON लौटाएं:
             
             return self._build_response(
                 intent, call_state, customer_data, conversation_history,
-                customer_response, language, result.get('next_state'),
-                result.get('should_transfer', False), result.get('context', {})
+                customer_response, language, 
+                next_state=None,
+                should_transfer=False, 
+                context=result.get('context', {}), 
+                commitment_date=commitment_date, 
+                num_days=num_days
             )
             
         except Exception as e:
@@ -272,13 +281,13 @@ JSON लौटाएं:
             if heuristic_intent:
                 return self._build_response(
                     heuristic_intent, call_state, customer_data,
-                    conversation_history, customer_response, language
+                    conversation_history, customer_response, language,
+                    commitment_date=commitment_date, num_days=num_days
                 )
             
             return self._build_fallback_response(unclear_count, customer_data, language)
     
     def _extract_json(self, text):
-        """Extract JSON from response"""
         text = text.strip()
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
@@ -287,7 +296,6 @@ JSON लौटाएं:
         return text
     
     def _build_conversation_context(self, history, language='en'):
-        """Build conversation context"""
         context = ""
         for turn in history[-3:]:
             if language == 'en':
@@ -300,16 +308,30 @@ JSON लौटाएं:
     
     def _build_response(self, intent, call_state, customer_data, 
                        conversation_history, customer_response, language='en',
-                       next_state=None, should_transfer=False, context=None):
-        """Build structured response in specified language with proper state management"""
+                       next_state=None, should_transfer=False, context=None,
+                       commitment_date=None, num_days=None):
+        
+        if not context:
+            context = {}
+        
+        # Handle commitment date
+        if commitment_date and num_days:
+            formatted_date = MultilingualScriptTemplates.format_date_for_speech(
+                commitment_date.strftime("%Y-%m-%d"), language
+            )
+            context['commitment_date'] = formatted_date
+            context['num_days'] = num_days
+            print(f"[CONTEXT/{language.upper()}] Commitment: {num_days} days → {formatted_date}")
         
         if not next_state:
             unclear_count = sum(1 for t in conversation_history if t.get('intent') == 'UNCLEAR')
             
             if intent == 'POLITE_EXIT':
                 next_state = 'HANGUP'
+            # --- CHANGE: Do not hang up immediately. Keep conversation open. ---
             elif intent in ['WILL_PAY_NOW', 'WILL_PAY_LATER', 'ALREADY_PAID']:
-                next_state = 'CONVERSATION'
+                next_state = 'CONVERSATION' 
+            # ------------------------------------------------------------------
             elif intent in ['DEMANDS_SUPERVISOR', 'ANGRY_ABUSIVE']:
                 next_state = 'PENDING_TRANSFER'
                 should_transfer = True
@@ -327,7 +349,7 @@ JSON लौटाएं:
                 language=language,
                 intent=intent,
                 customer_data=customer_data,
-                context=context or {},
+                context=context,
                 variation=0
             )
         
@@ -338,11 +360,11 @@ JSON लौटाएं:
             "next_state": next_state,
             "polite_bot_response": polite_response,
             "should_transfer": should_transfer,
-            "transfer_reason": f"Customer requested: {intent}" if should_transfer else None
+            "transfer_reason": f"Customer requested: {intent}" if should_transfer else None,
+            "context": context
         }
     
     def _build_fallback_response(self, unclear_count, customer_data, language='en'):
-        """Build safe fallback response"""
         if unclear_count >= 2:
             return {
                 "intent": "UNCLEAR",
@@ -356,7 +378,7 @@ JSON लौटाएं:
         else:
             fallback_text = (
                 "I'm sorry, could you please repeat that?" if language == 'en' else
-                "मुझे खेद है, क्या आप दोहरा सकते हैं?"
+                "सॉरी, क्या आप दोहरा सकते हैं?"
             )
             return {
                 "intent": "UNCLEAR",

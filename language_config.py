@@ -4,9 +4,10 @@ class LanguageConfig:
             'name': 'English',
             'code': 'en',
             'locale': 'en-IN',
-            'google_voice': 'en-IN-Wavenet-D',
+            'google_voice': 'en-IN-Chirp3-HD-Vindemiatrix',
             'google_language': 'en-IN',
             'stt_language': 'en-IN',
+            'speaking_rate': 0.9,  # <-- This was added
             'speech_hints': (
                 'yes, no, speaking, payment, pay, tomorrow, today, later, '
                 'manager, supervisor, help, extension, dispute, haan, ha, nahi, '
@@ -17,9 +18,10 @@ class LanguageConfig:
             'name': 'Hindi',
             'code': 'hi',
             'locale': 'hi-IN',
-            'google_voice': 'hi-IN-Wavenet-D',
+            'google_voice': 'hi-IN-Chirp3-HD-Aoede',
             'google_language': 'hi-IN',
             'stt_language': 'hi-IN',
+            'speaking_rate': 0.9,  # <-- This was added
             'speech_hints': (
                 'हां, नहीं, बोल रहा हूं, भुगतान, पे करूंगा, कल, आज, '
                 'मैनेजर, सुपरवाइजर, मदद, समय, विवाद, '
@@ -69,6 +71,18 @@ class LanguageConfig:
         """Get Google Cloud TTS voice name"""
         config = LanguageConfig.get_language_config(language_code)
         return config['google_voice']
+
+    # --- THIS IS THE MISSING METHOD ---
+    @staticmethod
+    def get_tts_config(language_code):
+        """Get full configuration for Text-to-Speech"""
+        config = LanguageConfig.get_language_config(language_code)
+        return {
+            'language_code': config['google_language'],
+            'voice_name': config['google_voice'],
+            'speaking_rate': config['speaking_rate']
+        }
+    # --- END OF MISSING METHOD ---
     
     @staticmethod
     def get_stt_config(language_code):
