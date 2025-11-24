@@ -21,7 +21,7 @@ class LanguageConfig:
             'google_voice': 'hi-IN-Chirp3-HD-Aoede',
             'google_language': 'hi-IN',
             'stt_language': 'hi-IN',
-            'speaking_rate': 0.9,  # <-- This was added
+            'speaking_rate': 0.95,  # <-- This was added
             'speech_hints': (
                 'हां, नहीं, बोल रहा हूं, भुगतान, पे करूंगा, कल, आज, '
                 'मैनेजर, सुपरवाइजर, मदद, समय, विवाद, '
