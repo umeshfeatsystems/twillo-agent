@@ -19,7 +19,9 @@ class Config:
     ENABLE_RECORDING = os.getenv('ENABLE_RECORDING', 'true').lower() == 'true'
     MAX_CALL_DURATION = int(os.getenv('MAX_CALL_DURATION', '600'))
     GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-    DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'en')
+    
+    # NEW DEFAULT: Hybrid mode
+    DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'en-hi-hybrid')
     
     @staticmethod
     def validate():
@@ -45,8 +47,9 @@ class Config:
         elif not os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
             errors.append(f"CRITICAL: Google Cloud credentials file not found at: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
         
-        if Config.DEFAULT_LANGUAGE not in ['en', 'hi']:
-            errors.append(f"WARNING: DEFAULT_LANGUAGE must be 'en' or 'hi'. Current: {Config.DEFAULT_LANGUAGE}")
+        # Updated validation to include hybrid
+        if Config.DEFAULT_LANGUAGE not in ['en', 'hi', 'en-hi-hybrid']:
+            errors.append(f"WARNING: DEFAULT_LANGUAGE must be 'en', 'hi', or 'en-hi-hybrid'. Current: {Config.DEFAULT_LANGUAGE}")
         
         if 'localhost' in Config.BASE_URL:
              errors.append("WARNING: BASE_URL is set to localhost. Twilio webhooks won't work! Use ngrok for testing.")

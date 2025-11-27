@@ -9,10 +9,15 @@ from datetime import datetime, timedelta
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         
         # English Regex Patterns
         self.INTENT_PATTERNS_EN = {
+            'CONFIRMED_IDENTITY': [
+                r'\b(speaking|this is|myself)\b',
+                r'\b(i am)\b(?!\s*not)', 
+                r'\b(yes|yeah|correct|right)\b'
+            ],
             'WILL_PAY_NOW': [
                 r'\b(will|gonna|going to|can|would like to)\s+(pay|make payment|settle|clear)',
                 r'\b(pay|paying|payment)\s+(now|immediately|right now|today|right away)',
@@ -37,7 +42,6 @@ class GeminiService:
                 r'\b(your name|naam kya)',
                 r'\b(calling from|kaha se)',
             ],
-            # --- UPDATED REGEX FOR "How did you got" & PRIVACY ---
             'ASK_SOURCE_OF_INFO': [
                 r'\b(how|where).*?(get|got|found|obtain|source).*?(number|details|info|data)',
                 r'\b(who gave).*?(number|details)',
@@ -78,17 +82,18 @@ class GeminiService:
                 r'\b(lost.*?job|no job|unemployed)',
                 r'\b(financial.*?(problem|issue|crisis))',
                 r'\b(no money|broke)',
-            ],
-            'CONFIRMED_IDENTITY': [
-                # Negative lookahead to ensure "I am" isn't followed by "not"
-                r'\b(speaking|this is|myself)\b',
-                r'\b(i am)\b(?!\s*not)', 
-                r'\b(yes|yeah|correct|right)\b'
             ]
         }
         
         # Hindi Regex Patterns
         self.INTENT_PATTERNS_HI = {
+            # MOVED TO TOP to prioritize Identity Confirmation over Polite Exit
+            'CONFIRMED_IDENTITY': [
+                r'\b(main|mai|hum).*?(bol|baat).*?(raha|rahi)',
+                r'\b(speaking|hi|hoon|hun)\b',
+                r'\b(ha|haan|yes|ji|sahi)\b',
+                r'\b(bilkul|zarur|hanji)\b'
+            ],
             'WILL_PAY_NOW': [
                 r'\b(अभी|आज|तुरंत|अब).*?(भर|दे|कर|भुगतान|पे).*?(दूंगा|दूंगी|देंगे|दूँगी|दूँगा|रहा|रही|हूं|हूँ)',
                 r'\b(भर|दे|कर|pay).*?(दूंगा|दूंगी|दूँगी|दूँगा).*?(आज|अभी)',
@@ -157,22 +162,35 @@ class GeminiService:
                 r'\b(paise|naukri|job).*?(nahi|gayi|problem|dikkat)',
                 r'\b(financial|arthik).*?(problem|issue)',
                 r'\b(garib|poor|pareshani)',
-            ],
-            'CONFIRMED_IDENTITY': [
-                r'\b(main|mai|hum).*?(bol|baat).*?(raha|rahi)',
-                r'\b(speaking|hi|hoon|hun)\b',
-                r'\b(ha|haan|yes|ji|sahi)\b'
             ]
         }
     
     def _match_intent_heuristic(self, text, language='en'):
         text_lower = text.lower().strip()
-        patterns = self.INTENT_PATTERNS_EN if language == 'en' else self.INTENT_PATTERNS_HI
-        for intent, pattern_list in patterns.items():
-            for pattern in pattern_list:
-                if re.search(pattern, text_lower, re.IGNORECASE):
-                    return intent, 0.95
-        return None, 0.0
+        
+        # --- HYBRID LOGIC ---
+        if language == 'en-hi-hybrid':
+            # Check English Patterns First
+            for intent, pattern_list in self.INTENT_PATTERNS_EN.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, text_lower, re.IGNORECASE):
+                        return intent, 0.95, 'en'
+            
+            # Then Check Hindi Patterns
+            for intent, pattern_list in self.INTENT_PATTERNS_HI.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, text_lower, re.IGNORECASE):
+                        return intent, 0.95, 'hi'
+            return None, 0.0, 'en-hi-hybrid' # Default if no match
+            
+        else:
+            # Standard single language logic
+            patterns = self.INTENT_PATTERNS_EN if language == 'en' else self.INTENT_PATTERNS_HI
+            for intent, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    if re.search(pattern, text_lower, re.IGNORECASE):
+                        return intent, 0.95, language
+            return None, 0.0, language
     
     def _extract_date_commitment(self, text, language='en'):
         text_lower = text.lower().strip()
@@ -198,55 +216,80 @@ class GeminiService:
         return None, None
     
     def generate_verification_script(self, customer_data, bank_name, language='en'):
-        return MultilingualScriptTemplates.get_verification_script(language, bank_name, customer_data['name'])
+        # For hybrid, first line is ALWAYS English
+        if language == 'en-hi-hybrid':
+            lang_for_script = 'en'
+        else:
+            lang_for_script = language
+            
+        return MultilingualScriptTemplates.get_verification_script(lang_for_script, bank_name, customer_data['name'])
     
     def analyze_verification(self, customer_response, customer_data, language='en'):
         print(f"[GEMINI/VERIFICATION/{language.upper()}] Analyzing: '{customer_response}'")
+        
+        # --- HYBRID DETECTION LOGIC ---
+        detected_lang = 'en' if language == 'en-hi-hybrid' else language
+        
+        # Heuristics
+        heuristic_intent, conf, detected_lang_from_heuristic = self._match_intent_heuristic(customer_response, language)
+        
+        if language == 'en-hi-hybrid' and detected_lang_from_heuristic in ['en', 'hi']:
+            detected_lang = detected_lang_from_heuristic
+            print(f"[HYBRID] Detected language via heuristic: {detected_lang}")
+
+        # Basic Word Matching (Updated for Hybrid & Hinglish)
         response_lower = customer_response.lower().strip()
         
-        # FIXED LOGIC: Prioritize Negatives first to avoid "I am not" matching "I am"
-        if language == 'en':
-            negative_words = ['no', 'not', 'wrong', 'incorrect', "isn't", "don't know", "none"]
-            positive_words = ['yes', 'yeah', 'correct', 'speaking', 'this is', 'i am', 'myself', 'yep']
-        else:
-            negative_words = ['नहीं', 'गलत', 'wrong', 'no', 'nahi', 'mat', 'na', 'kaun'] 
-            positive_words = ['हां', 'हा', 'जी', 'बोल रहा', 'में हूं', 'main hun', 'yes', 'मैं', 'sahi', 'yahi']
-            
-        # 1. Check Negative Words First
-        if any(word in response_lower for word in negative_words):
+        negative_words_en = ['no', 'not', 'wrong', 'incorrect', "isn't", "don't know", "none"]
+        # Added Hinglish negatives
+        negative_words_hi = ['नहीं', 'गलत', 'wrong', 'no', 'nahi', 'mat', 'na', 'kaun', 'nahin', 'nhi', 'wrong number']
+        
+        positive_words_en = ['yes', 'yeah', 'correct', 'speaking', 'this is', 'i am', 'myself', 'yep']
+        # Added Hinglish positives (haan, bilkul, bol raha, etc.)
+        positive_words_hi = [
+            'हां', 'हा', 'जी', 'बोल रहा', 'में हूं', 'main hun', 'yes', 'मैं', 'sahi', 'yahi',
+            'haan', 'han', 'bilkul', 'bol raha', 'bol rahi', 'hoon', 'hun', 'jee', 'ji', 'hanji'
+        ]
+
+        intent = 'UNCLEAR'
+
+        if any(word in response_lower for word in negative_words_en + negative_words_hi):
              intent = 'DENIED_IDENTITY'
-             
-        # 2. Then Check Positive Words
-        elif any(word in response_lower for word in positive_words): 
+        elif any(word in response_lower for word in positive_words_en + positive_words_hi): 
              intent = 'CONFIRMED_IDENTITY'
-             
-        else:
-            # 3. Fallback to Heuristics for questions
-            heuristic_intent, _ = self._match_intent_heuristic(customer_response, language)
-            if heuristic_intent in ['ASK_WHO_ARE_YOU', 'ASK_SOURCE_OF_INFO', 'ASK_DETAILS', 'REPEAT_DETAILS', 'ASK_AMOUNT']:
-                intent = heuristic_intent
-            else:
-                intent = 'UNCLEAR'
-            
-        polite_response = MultilingualScriptTemplates.get_verification_response(language, intent, Config.BANK_NAME, customer_data['name'])
-        return {"intent": intent, "polite_bot_response": polite_response}
+        elif heuristic_intent:
+             intent = heuristic_intent
+        
+        # Get polite response in the DETECTED language
+        polite_response = MultilingualScriptTemplates.get_verification_response(detected_lang, intent, Config.BANK_NAME, customer_data['name'])
+        
+        return {
+            "intent": intent, 
+            "polite_bot_response": polite_response,
+            "detected_language": detected_lang 
+        }
 
     def generate_emi_details_script(self, customer_data, language='en'):
-        return MultilingualScriptTemplates.get_emi_script(language, customer_data)
+        lang_to_use = 'en' if language == 'en-hi-hybrid' else language
+        return MultilingualScriptTemplates.get_emi_script(lang_to_use, customer_data)
     
     def get_bot_response(self, call_state, customer_response, customer_data, conversation_history, language='en'):
         print(f"[GEMINI/NLU/{language.upper()}] State={call_state}, Input='{customer_response}'")
         
-        # 1. Check Heuristics (Regex) FIRST for Inquiries/Questions
-        heuristic_intent, confidence = self._match_intent_heuristic(customer_response, language)
+        # 1. Check Heuristics & Language Detection
+        heuristic_intent, confidence, detected_lang = self._match_intent_heuristic(customer_response, language)
         
+        if language == 'en-hi-hybrid':
+            current_response_lang = detected_lang if detected_lang in ['en', 'hi'] else 'en'
+        else:
+            current_response_lang = language
+
         # 2. Check Date/Commitment
         commitment_date, num_days = self._extract_date_commitment(customer_response, language)
         
         intent = None
 
         # --- PRIORITY LOGIC ---
-        # Prioritize answering questions over accepting payments blindly
         priority_intents = [
             'ASK_WHO_ARE_YOU', 'ASK_SOURCE_OF_INFO', 'ASK_DETAILS', 
             'ASK_AMOUNT', 'REPEAT_DETAILS', 'DISPUTE_AMOUNT', 
@@ -255,17 +298,12 @@ class GeminiService:
 
         if heuristic_intent in priority_intents and confidence >= 0.8:
             intent = heuristic_intent
-            print(f"[LOGIC] Priority Inquiry Detected: {intent} (Ignoring date logic for now)")
-        
         elif commitment_date:
-            print(f"[LOGIC] Date detected ({num_days} days).")
             if num_days == 0: intent = 'WILL_PAY_NOW'
             elif num_days > 7: intent = 'REQUEST_EXTENSION'
             else: intent = 'WILL_PAY_LATER'
-        
         elif heuristic_intent:
             intent = heuristic_intent
-            print(f"[HEURISTIC] Matched: {intent} ({confidence})")
 
         # Context-Aware Exit Logic
         last_intent = conversation_history[-1].get('intent') if conversation_history else None
@@ -276,10 +314,10 @@ class GeminiService:
                  intent = 'POLITE_EXIT'
 
         if not intent:
-            if len(customer_response.split()) < 3 and language == 'hi' and 'ha' in customer_response.lower(): intent = 'POLITE_EXIT' 
+            if len(customer_response.split()) < 3 and current_response_lang == 'hi' and 'ha' in customer_response.lower(): intent = 'POLITE_EXIT' 
             else: intent = 'UNCLEAR' 
 
-        return self._build_response(intent, call_state, customer_data, conversation_history, customer_response, language, commitment_date=commitment_date, num_days=num_days)
+        return self._build_response(intent, call_state, customer_data, conversation_history, customer_response, current_response_lang, commitment_date=commitment_date, num_days=num_days)
 
     def _build_response(self, intent, call_state, customer_data, conversation_history, customer_response, language='en', next_state=None, should_transfer=False, context=None, commitment_date=None, num_days=None):
         if not context: context = {}
@@ -289,7 +327,6 @@ class GeminiService:
         
         if not next_state:
             if intent == 'POLITE_EXIT': next_state = 'HANGUP'
-            # INQUIRIES & DISPUTES: Stay in conversation
             elif intent in ['ASK_WHO_ARE_YOU', 'ASK_SOURCE_OF_INFO', 'ASK_DETAILS', 'REPEAT_DETAILS', 'ASK_AMOUNT', 'DISPUTE_AMOUNT', 'REQUEST_PAYMENT_PLAN', 'FACING_FINANCIAL_ISSUES']: next_state = 'CONVERSATION' 
             elif intent == 'WILL_PAY_NOW': next_state = 'CONVERSATION' 
             elif intent in ['WILL_PAY_LATER', 'REQUEST_EXTENSION', 'ALREADY_PAID', 'CONFIRMED_IDENTITY']: next_state = 'CONVERSATION'
@@ -304,4 +341,11 @@ class GeminiService:
         else:
             polite_response = MultilingualScriptTemplates.get_conversation_response(language=language, intent=intent, customer_data=customer_data, context=context, variation=0)
         
-        return {"intent": intent, "next_state": next_state, "polite_bot_response": polite_response, "should_transfer": should_transfer, "context": context}
+        return {
+            "intent": intent, 
+            "next_state": next_state, 
+            "polite_bot_response": polite_response, 
+            "should_transfer": should_transfer, 
+            "context": context,
+            "detected_language": language 
+        }
