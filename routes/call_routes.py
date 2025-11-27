@@ -30,14 +30,10 @@ class InitiateCallRequest(BaseModel):
 
     @validator('language')
     def validate_language(cls, v):
-        # 1. Handle "hybrid" alias automatically
         if v and v.lower() == 'hybrid':
             return 'en-hi-hybrid'
-            
-        # 2. Validation
         if v is not None and not LanguageConfig.is_valid_language(v):
             valid_langs = list(LanguageConfig.SUPPORTED_LANGUAGES.keys())
-            # Add 'hybrid' to the error message so users know it's an option
             valid_langs.append('hybrid') 
             raise ValueError(f"Unsupported language '{v}'. Supported: {valid_langs}")
         return v
@@ -162,13 +158,14 @@ async def generate_greeting(
                 call_record = call
                 break
         
-        # Get language state (e.g., 'en-hi-hybrid')
         language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
         print(f"[DEBUG] Session Language State: {language}")
 
-        # --- HYBRID LOGIC FOR FIRST LINE ---
-        # If hybrid, we use English for the script generation, but we KEEP 'en-hi-hybrid'
-        # as the language passed to Twilio so it uses the hybrid STT hints.
+        # Determine Voice Override for Hybrid Mode
+        voice_override = None
+        if language == 'en-hi-hybrid':
+            voice_override = LanguageConfig.HYBRID_VOICE_NAME
+
         script = gemini_service.generate_verification_script(
             customer, Config.BANK_NAME, language
         )
@@ -190,11 +187,8 @@ async def generate_greeting(
             }
         )
         
-        # Pass the hybrid language code to Twilio service so it sets up STT correctly
-        # But ensure TTS generates English (handled inside generate_verification_script logic)
-        # Note: Google TTS Service handles 'en-hi-hybrid' by defaulting to English voice.
         twiml = twilio_service.generate_initial_twiml(
-            script, customer_id, language
+            script, customer_id, language, voice_override=voice_override
         )
         
         return Response(content=twiml, media_type="application/xml")
@@ -236,13 +230,17 @@ async def process_response(
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
 
-        # Current session language (e.g. 'en-hi-hybrid')
         session_language = call_record.get('language', Config.DEFAULT_LANGUAGE)
         current_call_state = call_record.get('call_state', 'CONVERSATION')
         conversation_history = call_record.get('conversation_history', [])
         unclear_count = call_record.get('unclear_count', 0)
         stored_context = call_record.get('context', {})
         
+        # Determine Voice Override
+        voice_override = None
+        if session_language == 'en-hi-hybrid':
+            voice_override = LanguageConfig.HYBRID_VOICE_NAME
+
         print(f"[DEBUG] Session Language: {session_language}, State: {current_call_state}")
         
         if not speech_result or speech_result.strip() == '':
@@ -255,7 +253,6 @@ async def process_response(
                 {'$set': {'call_history.$.unclear_count': unclear_count}}
             )
             
-            # Use 'en' as fallback for reprompt in hybrid mode
             reprompt_lang = 'en' if session_language == 'en-hi-hybrid' else session_language
             
             if unclear_count >= 3:
@@ -263,14 +260,17 @@ async def process_response(
                     "I'm having trouble hearing you. Let me connect you with a specialist." 
                     if reprompt_lang == 'en' else 
                     "मुझे आपको सुनने में प्रॉब्लम हो रही है। मैं आपको एक स्पेशलिस्ट से कनेक्ट करती हूं।",
-                    reprompt_lang
+                    reprompt_lang,
+                    voice_override=voice_override
                 )
             else:
                 reprompt = (
                     "I'm sorry, I didn't catch that. Could you please repeat?" if reprompt_lang == 'en' else 
                     "सॉरी, मुझे समझ नहीं आया। क्या आप दोहरा सकते हैं?"
                 )
-                twiml = twilio_service.generate_followup_twiml(reprompt, customer_id, session_language)
+                twiml = twilio_service.generate_followup_twiml(
+                    reprompt, customer_id, session_language, voice_override=voice_override
+                )
             
             return Response(content=twiml, media_type="application/xml")
         
@@ -278,39 +278,47 @@ async def process_response(
         
         # --- VERIFICATION STATE ---
         if current_call_state == 'AWAITING_VERIFICATION':
-            # Analyze using session language (hybrid logic inside Gemini)
             bot_decision = gemini_service.analyze_verification(
                 speech_result, customer, session_language
             )
             
             intent = bot_decision.get('intent')
             followup_text = bot_decision.get('polite_bot_response')
-            # Critical: Use the language Gemini DETECTED for this specific response
             response_language = bot_decision.get('detected_language', 'en')
             
             print(f"[DEBUG] Verification Intent: {intent}, Responding in: {response_language}")
 
             if intent == 'CONFIRMED_IDENTITY':
-                next_state = 'PRESENTING_DETAILS'
+                # --- FAST PATH: Immediate EMI Presentation ---
+                next_state = 'CONVERSATION'
                 
-                # Check previous turn language or use detected language for the EMI script
-                # If we detected Hindi in verification, we want the EMI script in Hindi too.
-                # If detected English, EMI script in English.
+                # 1. Fetch EMI Script immediately
+                # Use detected language (e.g. 'hi') so the script matches what user just spoke
+                emi_script = gemini_service.generate_emi_details_script(customer, response_language)
                 
-                redirect_url = f"{Config.BASE_URL}/api/call/present-details?customer_id={customer_id}&detected_lang={response_language}"
+                # 2. Combine "Thank you" and "EMI Details" into one speech
+                # e.g., "Great, thank you. Regarding your Home Loan..."
+                combined_text = f"{followup_text} {emi_script}"
                 
-                twiml = twilio_service.generate_say_and_redirect_twiml(
-                    followup_text, redirect_url, response_language
+                # 3. Generate TwiML immediately (No redirect)
+                twiml = twilio_service.generate_followup_twiml(
+                    combined_text, customer_id, response_language, voice_override=voice_override
                 )
+                
+                # Log the combined response
+                followup_text = combined_text
             
             elif intent in ['DENIED_IDENTITY', 'NOT_INTERESTED']:
                 next_state = 'HANGUP'
-                twiml = twilio_service.generate_goodbye_twiml(followup_text, response_language)
+                twiml = twilio_service.generate_goodbye_twiml(
+                    followup_text, response_language, voice_override=voice_override
+                )
             
             else:
                 next_state = 'AWAITING_VERIFICATION'
-                # Use session_language for STT gathering to keep listening in hybrid
-                twiml = twilio_service.generate_followup_twiml(followup_text, customer_id, session_language)
+                twiml = twilio_service.generate_followup_twiml(
+                    followup_text, customer_id, session_language, voice_override=voice_override
+                )
             
             interaction_record = {
                 'timestamp': datetime.utcnow().isoformat(),
@@ -318,8 +326,8 @@ async def process_response(
                 'bot_response': followup_text,
                 'intent': intent,
                 'state_transition': f"{current_call_state} -> {next_state}",
-                'language': session_language, # Session state remains hybrid
-                'detected_language': response_language # Log what was spoken
+                'language': session_language,
+                'detected_language': response_language
             }
             collection.update_one(
                 {'call_history.call_id': CallSid},
@@ -346,12 +354,10 @@ async def process_response(
             intent = bot_decision.get('intent', 'UNCLEAR')
             should_transfer = bot_decision.get('should_transfer', False)
             response_context = bot_decision.get('context', {})
-            # Critical: The language Gemini generated the text in
             response_language = bot_decision.get('detected_language', 'en')
             
             print(f"[DEBUG] Converastion Intent: {intent}, Responding in: {response_language}")
 
-            # Merge contexts
             stored_context.update(response_context)
             
             if intent == 'UNCLEAR':
@@ -387,17 +393,25 @@ async def process_response(
             collection.update_one({'call_history.call_id': CallSid}, update_data)
             
             if next_state in ['CONVERSATION', 'COLLECTING_COMMITMENT', 'OFFERING_SOLUTIONS', 'OFFERING_OPTIONS']:
-                twiml = twilio_service.generate_followup_twiml(followup_text, customer_id, response_language)
+                # Pass response_language for STT bias in next turn, but force Voice if Hybrid
+                twiml = twilio_service.generate_followup_twiml(
+                    followup_text, customer_id, response_language, voice_override=voice_override
+                )
                 
             elif next_state == 'PENDING_TRANSFER':
-                twiml = twilio_service.generate_transfer_twiml(followup_text, response_language)
+                twiml = twilio_service.generate_transfer_twiml(
+                    followup_text, response_language, voice_override=voice_override
+                )
             elif next_state == 'HANGUP':
-                twiml = twilio_service.generate_goodbye_twiml(followup_text, response_language)
+                twiml = twilio_service.generate_goodbye_twiml(
+                    followup_text, response_language, voice_override=voice_override
+                )
             else:
                 twiml = twilio_service.generate_goodbye_twiml(
                     "Thank you for your time. Goodbye." if response_language == 'en' else 
                     "आपके टाइम के लिए थैंक्यू। अलविदा।",
-                    response_language
+                    response_language,
+                    voice_override=voice_override
                 )
 
             return Response(content=twiml, media_type="application/xml")
@@ -416,10 +430,11 @@ async def process_response(
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
 
+# Keep the present_details route for direct API access if needed, but it's skipped in standard flow
 @router.post('/present-details')
 async def present_details(
     customer_id: str,
-    detected_lang: str = None, # NEW PARAM
+    detected_lang: str = None, 
     CallSid: str = Form(...)
 ):
     try:
@@ -438,11 +453,12 @@ async def present_details(
                 call_record = call
                 break
         
-        # Use detected_lang if passed (from verification step), else session default
         session_language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
-        
-        # If we have a specific detected language (e.g. 'hi') use it, otherwise use session (which might be hybrid -> defaults 'en')
         lang_to_use = detected_lang if detected_lang else session_language
+        
+        voice_override = None
+        if session_language == 'en-hi-hybrid':
+            voice_override = LanguageConfig.HYBRID_VOICE_NAME
         
         emi_script = gemini_service.generate_emi_details_script(customer, lang_to_use)
         
@@ -465,9 +481,9 @@ async def present_details(
             }
         )
         
-        # We pass lang_to_use here so TTS is correct. 
-        # STT for the NEXT user response will be biased to this language, which is "adapting".
-        twiml = twilio_service.generate_followup_twiml(emi_script, customer_id, lang_to_use)
+        twiml = twilio_service.generate_followup_twiml(
+            emi_script, customer_id, lang_to_use, voice_override=voice_override
+        )
         
         return Response(content=twiml, media_type="application/xml")
 
@@ -483,10 +499,7 @@ async def present_details(
         return Response(content=str(response), media_type="application/xml")
 
 @router.post('/handle-recording')
-async def handle_recording(
-    CallSid: str = Form(...),
-    RecordingUrl: str = Form(None)
-):
+async def handle_recording(CallSid: str = Form(...), RecordingUrl: str = Form(None)):
     try:
         if not RecordingUrl:
             return Response(status_code=200)
@@ -517,19 +530,13 @@ async def handle_recording(
             {'call_history.call_id': CallSid},
             {'$set': {'call_history.$.recording_url': audio_filepath}}
         )
-        
         return Response(status_code=200)
-        
     except Exception as e:
         print(f"Error in handle_recording: {str(e)}")
         return Response(status_code=200)
 
 @router.post('/status')
-async def call_status(
-    CallSid: str = Form(...),
-    CallStatus: str = Form(...),
-    CallDuration: int = Form(0)
-):
+async def call_status(CallSid: str = Form(...), CallStatus: str = Form(...), CallDuration: int = Form(0)):
     try:
         collection = Customer.get_collection()
         collection.update_one(
@@ -542,36 +549,23 @@ async def call_status(
             }
         )
         return Response(status_code=200)
-    
     except Exception as e:
         print(f"Error in call_status: {str(e)}")
         return Response(status_code=200)
 
 @router.post('/handle-transfer-status')
-async def handle_transfer_status(
-    CallSid: str = Form(...),
-    DialCallStatus: str = Form(...)
-):
+async def handle_transfer_status(CallSid: str = Form(...), DialCallStatus: str = Form(...)):
     try:
         response = VoiceResponse()
-        
         if DialCallStatus == 'completed':
-            response.say(
-                "Thank you for speaking with our specialist. Goodbye.",
-                voice='Polly.Aditi', language='en-IN'
-            )
+            response.say("Thank you for speaking with our specialist. Goodbye.", voice='Polly.Aditi', language='en-IN')
             response.hangup()
         elif DialCallStatus in ['no-answer', 'busy', 'failed', 'canceled']:
-            response.say(
-                "Our specialist is unavailable. We'll call you back. Goodbye.",
-                voice='Polly.Aditi', language='en-IN'
-            )
+            response.say("Our specialist is unavailable. We'll call you back. Goodbye.", voice='Polly.Aditi', language='en-IN')
             response.hangup()
         else:
             response.hangup()
-
         return Response(content=str(response), media_type="application/xml")
-    
     except Exception as e:
         print(f"Error in handle_transfer_status: {str(e)}")
         response = VoiceResponse()
@@ -623,6 +617,5 @@ async def get_call_history(customer_id: str):
             'total_calls': len(call_history),
             'call_history': formatted_history
         }
-    
     except Exception as e:
         return JSONResponse({'error': str(e)}, status_code=500)
