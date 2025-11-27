@@ -11,13 +11,15 @@ class Config:
     TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
     BANK_NAME = os.getenv('BANK_NAME', 'Your Bank')
     AGENT_PHONE_NUMBER = os.getenv('AGENT_PHONE_NUMBER')
-    SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
-    BASE_URL = os.getenv('BASE_URL', 'http://localhost:5000')
+    
+    # Updated default port to 8000 for FastAPI
+    BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
+    
     MACHINE_DETECTION = os.getenv('MACHINE_DETECTION', 'Disable')
     ENABLE_RECORDING = os.getenv('ENABLE_RECORDING', 'true').lower() == 'true'
     MAX_CALL_DURATION = int(os.getenv('MAX_CALL_DURATION', '600'))
     GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-    DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'en')  # NEW: Set default language
+    DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'en')
     
     @staticmethod
     def validate():
@@ -46,8 +48,8 @@ class Config:
         if Config.DEFAULT_LANGUAGE not in ['en', 'hi']:
             errors.append(f"WARNING: DEFAULT_LANGUAGE must be 'en' or 'hi'. Current: {Config.DEFAULT_LANGUAGE}")
         
-        if Config.BASE_URL == 'http://localhost:5000':
-            errors.append("WARNING: BASE_URL is set to localhost. Twilio webhooks won't work! Use ngrok for testing.")
+        if 'localhost' in Config.BASE_URL:
+             errors.append("WARNING: BASE_URL is set to localhost. Twilio webhooks won't work! Use ngrok for testing.")
         
         if Config.BANK_NAME == 'Your Bank':
             errors.append("WARNING: BANK_NAME is not set in .env. Using default 'Your Bank'.")
@@ -57,25 +59,20 @@ class Config:
     @staticmethod
     def print_config():
         print("\n" + "="*60)
-        print("📋 CONFIGURATION")
+        print("📋 CONFIGURATION (FastAPI)")
         print("="*60)
         print(f"MongoDB URI: {Config.MONGODB_URI[:30]}...")
         print(f"Gemini API Key: {'✓ Set' if Config.GEMINI_API_KEY else '✗ Missing'}")
         print(f"Twilio Account SID: {Config.TWILIO_ACCOUNT_SID[:10] if Config.TWILIO_ACCOUNT_SID else '✗ Missing'}...")
         print(f"Twilio Phone: {Config.TWILIO_PHONE_NUMBER if Config.TWILIO_PHONE_NUMBER else '✗ Missing'}")
         print(f"Bank Name: {Config.BANK_NAME}")
-        print(f"Agent Phone: {Config.AGENT_PHONE_NUMBER if Config.AGENT_PHONE_NUMBER else '✗ Not Set (transfers disabled)'}")
+        print(f"Agent Phone: {Config.AGENT_PHONE_NUMBER if Config.AGENT_PHONE_NUMBER else '✗ Not Set'}")
         print(f"Base URL: {Config.BASE_URL}")
-        print(f"Machine Detection: {Config.MACHINE_DETECTION}")
-        print(f"Recording: {'Enabled' if Config.ENABLE_RECORDING else 'Disabled'}")
         print(f"Default Language: {Config.DEFAULT_LANGUAGE}")
         
         if Config.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
             print(f"Google TTS: ✓ ENABLED (credentials found)")
-            print(f"Credentials: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
         else:
-            print(f"Google TTS: ✗ CRITICAL ERROR - Credentials missing or invalid")
-            if Config.GOOGLE_APPLICATION_CREDENTIALS:
-                print(f"Expected path: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
+            print(f"Google TTS: ✗ CRITICAL ERROR - Credentials missing")
         
         print("="*60 + "\n")

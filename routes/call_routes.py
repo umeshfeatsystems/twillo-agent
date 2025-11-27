@@ -1,41 +1,44 @@
-from flask import Blueprint, request, jsonify, send_file
-from twilio.twiml.voice_response import VoiceResponse, Gather
+from fastapi import APIRouter, Request, Response, Form, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse, FileResponse
+from twilio.twiml.voice_response import VoiceResponse
 from models.customer import Customer
 from services.gemini_service import GeminiService
 from services.twilio_service import TwilioService
-from language_config import LanguageConfig
+from config import Config
 from datetime import datetime
-import uuid
 import os
 import requests
-from config import Config
-from services.google_tts_service import google_tts_service
-import base64
+import traceback
+from pydantic import BaseModel
 
-call_bp = Blueprint('call', __name__)
+# Initialize Router
+router = APIRouter(prefix="/api/call", tags=["Call Logic"])
+
+# Services
 gemini_service = GeminiService()
 twilio_service = TwilioService()
 
+# Ensure directories exist
 if not os.path.exists('data'):
     os.makedirs('data')
 
-@call_bp.route('/initiate', methods=['POST'])
-def initiate_call():
+# Pydantic Model for Initiate Call
+class InitiateCallRequest(BaseModel):
+    customer_id: str
+
+@router.post('/initiate')
+async def initiate_call(request: InitiateCallRequest):
     try:
-        data = request.get_json()
-        customer_id = data.get('customer_id')
-        
-        if not customer_id:
-            return jsonify({'error': 'customer_id is required'}), 400
+        customer_id = request.customer_id
         
         customer = Customer.find_by_id(customer_id)
-        
         if not customer:
-            return jsonify({'error': 'Customer not found'}), 404
+            return JSONResponse({'error': 'Customer not found'}, status_code=404)
         
         if customer['bank_details']['pending_emi_amount'] <= 0:
-            return jsonify({'error': 'No pending EMI for this customer'}), 400
+            return JSONResponse({'error': 'No pending EMI for this customer'}, status_code=400)
         
+        # Initiate Call
         call_result = twilio_service.initiate_call(
             customer['phone'],
             customer['customer_id']
@@ -61,101 +64,91 @@ def initiate_call():
             
             Customer.update_call_history(customer_id, call_record)
             
-            return jsonify({
+            return {
                 'success': True,
                 'message': f"Call initiated to {customer['name']}",
                 'call_sid': call_result['call_sid'],
                 'call_ref': call_result['call_ref'],
                 'language': Config.DEFAULT_LANGUAGE
-            }), 200
+            }
         else:
-            return jsonify({
-                'success': False,
-                'error': call_result['error']
-            }), 500
+            return JSONResponse({'success': False, 'error': call_result['error']}, status_code=500)
     
     except Exception as e:
         print(f"Error in initiate_call: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return JSONResponse({'error': str(e)}, status_code=500)
 
-@call_bp.route('/tts-audio/<filename>', methods=['GET'])
-def serve_tts_audio(filename):
+@router.get('/tts-audio/{filename}')
+async def serve_tts_audio(filename: str):
     try:
         filepath = os.path.join('tts_cache', filename)
         
         if not os.path.exists(filepath):
             print(f"[ERROR] Audio file not found: {filepath}")
-            return '', 404
+            return Response(status_code=404)
         
-        return send_file(
-            filepath,
-            mimetype='audio/mpeg',
-            as_attachment=False
-        )
+        return FileResponse(filepath, media_type='audio/mpeg')
     
     except Exception as e:
         print(f"[ERROR] Failed to serve audio: {str(e)}")
-        return '', 500
+        return Response(status_code=500)
 
-@call_bp.route('/handle-answer', methods=['POST'])
-def handle_answer():
+@router.post('/handle-answer')
+async def handle_answer(
+    customer_id: str,
+    CallSid: str = Form(...),
+    AnsweredBy: str = Form('human')
+):
     try:
-        call_sid = request.form.get('CallSid')
-        answered_by = request.form.get('AnsweredBy', 'human')
-        customer_id = request.args.get('customer_id')
+        print(f"[DEBUG] handle-answer called: CallSid={CallSid}, customer_id={customer_id}")
         
-        print(f"[DEBUG] handle-answer called: CallSid={call_sid}, customer_id={customer_id}")
-        
-        if answered_by != 'human':
-            print(f"Answering machine detected for {call_sid}")
+        if AnsweredBy != 'human':
+            print(f"Answering machine detected for {CallSid}")
             collection = Customer.get_collection()
             collection.update_one(
-                {'call_history.call_id': call_sid},
+                {'call_history.call_id': CallSid},
                 {'$set': {'call_history.$.outcome': 'answering_machine'}}
             )
             twiml = twilio_service.generate_hangup_for_machine_twiml()
-            return twiml, 200, {'Content-Type': 'text/xml'}
+            return Response(content=twiml, media_type="application/xml")
 
         redirect_url = f"{Config.BASE_URL}/api/call/generate-greeting?customer_id={customer_id}"
         
         response = VoiceResponse()
         response.redirect(redirect_url, method='POST')
         
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
     
     except Exception as e:
         print(f"Error in handle_answer: {str(e)}")
-        import traceback
         traceback.print_exc()
         response = VoiceResponse()
         response.say("We're experiencing technical difficulties. Please call us back.")
         response.hangup()
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
 
-@call_bp.route('/generate-greeting', methods=['POST'])
-def generate_greeting():
+@router.post('/generate-greeting')
+async def generate_greeting(
+    customer_id: str,
+    CallSid: str = Form(...)
+):
     try:
-        customer_id = request.args.get('customer_id')
-        call_sid = request.form.get('CallSid')
-        
-        print(f"[DEBUG] generate-greeting: customer_id={customer_id}, call_sid={call_sid}")
+        print(f"[DEBUG] generate-greeting: customer_id={customer_id}, call_sid={CallSid}")
         
         customer = Customer.find_by_id(customer_id)
         if not customer:
-            print(f"Error: Customer not found")
             response = VoiceResponse()
             response.say("We're having trouble retrieving your details.")
             response.hangup()
-            return str(response), 200, {'Content-Type': 'text/xml'}
+            return Response(content=str(response), media_type="application/xml")
 
         call_record = None
         for call in customer.get('call_history', []):
-            if call.get('call_id') == call_sid:
+            if call.get('call_id') == CallSid:
                 call_record = call
                 break
         
         language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
-        print(f"[DEBUG] Using language: {language}")
         
         script = gemini_service.generate_verification_script(
             customer, Config.BANK_NAME, language
@@ -172,7 +165,7 @@ def generate_greeting():
         
         collection = Customer.get_collection()
         collection.update_one(
-            {'call_history.call_id': call_sid},
+            {'call_history.call_id': CallSid},
             {
                 '$push': {'call_history.$.conversation_history': interaction_record},
                 '$set': {'call_history.$.call_state': 'AWAITING_VERIFICATION'}
@@ -183,24 +176,24 @@ def generate_greeting():
             script, customer_id, language
         )
         
-        return twiml, 200, {'Content-Type': 'text/xml'}
+        return Response(content=twiml, media_type="application/xml")
 
     except Exception as e:
         print(f"Error in generate_greeting: {str(e)}")
-        import traceback
         traceback.print_exc()
         response = VoiceResponse()
         response.say("We're experiencing technical difficulties.")
         response.hangup()
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
 
-@call_bp.route('/process-response', methods=['POST'])
-def process_response():
+@router.post('/process-response')
+async def process_response(
+    customer_id: str,
+    CallSid: str = Form(...),
+    SpeechResult: str = Form(None)
+):
     try:
-        customer_id = request.args.get('customer_id')
-        call_sid = request.form.get('CallSid')
-        speech_result = request.form.get('SpeechResult', '')
-        
+        speech_result = SpeechResult if SpeechResult else ''
         print(f"[DEBUG] process-response: speech='{speech_result}'")
         
         customer = Customer.find_by_id(customer_id)
@@ -208,11 +201,11 @@ def process_response():
             response = VoiceResponse()
             response.say("We're having trouble retrieving your details.")
             response.hangup()
-            return str(response), 200, {'Content-Type': 'text/xml'}
+            return Response(content=str(response), media_type="application/xml")
 
         call_record = None
         for call in customer.get('call_history', []):
-            if call.get('call_id') == call_sid:
+            if call.get('call_id') == CallSid:
                 call_record = call
                 break
         
@@ -220,7 +213,7 @@ def process_response():
             response = VoiceResponse()
             response.say("We're having trouble finding this call record.")
             response.hangup()
-            return str(response), 200, {'Content-Type': 'text/xml'}
+            return Response(content=str(response), media_type="application/xml")
 
         language = call_record.get('language', Config.DEFAULT_LANGUAGE)
         current_call_state = call_record.get('call_state', 'CONVERSATION')
@@ -236,7 +229,7 @@ def process_response():
             
             collection = Customer.get_collection()
             collection.update_one(
-                {'call_history.call_id': call_sid},
+                {'call_history.call_id': CallSid},
                 {'$set': {'call_history.$.unclear_count': unclear_count}}
             )
             
@@ -253,10 +246,12 @@ def process_response():
                     "सॉरी, मुझे समझ नहीं आया। क्या आप दोहरा सकते हैं?"
                 )
                 twiml = twilio_service.generate_followup_twiml(reprompt, customer_id, language)
-            return twiml, 200, {'Content-Type': 'text/xml'}
+            
+            return Response(content=twiml, media_type="application/xml")
         
         collection = Customer.get_collection()
         
+        # --- VERIFICATION STATE LOGIC ---
         if current_call_state == 'AWAITING_VERIFICATION':
             print(f"[DEBUG] Analyzing verification in {language}")
             bot_decision = gemini_service.analyze_verification(
@@ -295,7 +290,7 @@ def process_response():
                 'language': language
             }
             collection.update_one(
-                {'call_history.call_id': call_sid},
+                {'call_history.call_id': CallSid},
                 {
                     '$push': {'call_history.$.conversation_history': interaction_record},
                     '$set': {
@@ -304,8 +299,9 @@ def process_response():
                     }
                 }
             )
-            return twiml, 200, {'Content-Type': 'text/xml'}
+            return Response(content=twiml, media_type="application/xml")
             
+        # --- MAIN CONVERSATION LOGIC ---
         elif current_call_state in ['CONVERSATION', 'COLLECTING_COMMITMENT', 'OFFERING_SOLUTIONS', 'OFFERING_OPTIONS']:
             print(f"[DEBUG] Main conversation in {language}")
             bot_decision = gemini_service.get_bot_response(
@@ -351,7 +347,7 @@ def process_response():
             if should_transfer:
                 update_data['$set']['call_history.$.transfer_attempted'] = True
             
-            collection.update_one({'call_history.call_id': call_sid}, update_data)
+            collection.update_one({'call_history.call_id': CallSid}, update_data)
             
             if next_state in ['CONVERSATION', 'COLLECTING_COMMITMENT', 'OFFERING_SOLUTIONS', 'OFFERING_OPTIONS']:
                 twiml = twilio_service.generate_followup_twiml(followup_text, customer_id, language)
@@ -366,33 +362,29 @@ def process_response():
                     language
                 )
 
-            return twiml, 200, {'Content-Type': 'text/xml'}
+            return Response(content=twiml, media_type="application/xml")
             
         else:
             print(f"Error: Unhandled state '{current_call_state}'")
             response = VoiceResponse()
-            response.say(
-                "An unexpected error occurred." if language == 'en' else 
-                "एक अनएक्सपेक्टेड एरर हुई।"
-            )
+            response.say("An unexpected error occurred.")
             response.hangup()
-            return str(response), 200, {'Content-Type': 'text/xml'}
+            return Response(content=str(response), media_type="application/xml")
     
     except Exception as e:
         print(f"Error in process_response: {str(e)}")
-        import traceback
         traceback.print_exc()
         response = VoiceResponse()
         response.say("Thank you for your response. We will follow up shortly.")
         response.hangup()
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
 
-@call_bp.route('/present-details', methods=['POST'])
-def present_details():
+@router.post('/present-details')
+async def present_details(
+    customer_id: str,
+    CallSid: str = Form(...)
+):
     try:
-        customer_id = request.args.get('customer_id')
-        call_sid = request.form.get('CallSid')
-        
         print(f"[DEBUG] present-details: customer_id={customer_id}")
         
         customer = Customer.find_by_id(customer_id)
@@ -400,11 +392,11 @@ def present_details():
             response = VoiceResponse()
             response.say("We're having trouble retrieving your details.")
             response.hangup()
-            return str(response), 200, {'Content-Type': 'text/xml'}
+            return Response(content=str(response), media_type="application/xml")
 
         call_record = None
         for call in customer.get('call_history', []):
-            if call.get('call_id') == call_sid:
+            if call.get('call_id') == CallSid:
                 call_record = call
                 break
         
@@ -424,7 +416,7 @@ def present_details():
         
         collection = Customer.get_collection()
         collection.update_one(
-            {'call_history.call_id': call_sid},
+            {'call_history.call_id': CallSid},
             {
                 '$push': {'call_history.$.conversation_history': interaction_record},
                 '$set': {'call_history.$.call_state': next_state}
@@ -433,11 +425,10 @@ def present_details():
         
         twiml = twilio_service.generate_followup_twiml(emi_script, customer_id, language)
         
-        return twiml, 200, {'Content-Type': 'text/xml'}
+        return Response(content=twiml, media_type="application/xml")
 
     except Exception as e:
         print(f"Error in present_details: {str(e)}")
-        import traceback
         traceback.print_exc()
         response = VoiceResponse()
         response.say("We're experiencing a slight delay.")
@@ -445,88 +436,90 @@ def present_details():
             f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST'
         )
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
 
-@call_bp.route('/handle-recording', methods=['POST'])
-def handle_recording():
+@router.post('/handle-recording')
+async def handle_recording(
+    CallSid: str = Form(...),
+    RecordingUrl: str = Form(None)
+):
     try:
-        call_sid = request.form.get('CallSid')
-        recording_url = request.form.get('RecordingUrl')
-        
-        if not recording_url:
-            return '', 200
+        if not RecordingUrl:
+            return Response(status_code=200)
         
         collection = Customer.get_collection()
-        customer = collection.find_one({'call_history.call_id': call_sid})
+        customer = collection.find_one({'call_history.call_id': CallSid})
         
         if not customer:
-            return '', 200
+            return Response(status_code=200)
             
         customer_id = customer['customer_id']
         customer_dir = os.path.join('data', customer_id)
         if not os.path.exists(customer_dir):
             os.makedirs(customer_dir)
             
-        audio_filename = f"{call_sid}.wav"
+        audio_filename = f"{CallSid}.wav"
         audio_filepath = os.path.join(customer_dir, audio_filename)
         
         auth = (Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
-        with requests.get(f"{recording_url}.wav", auth=auth, stream=True) as r:
+        
+        # We can use BackgroundTasks for this, but for now simple sync request is safer
+        # to ensure it completes. In a high-load system, offload this to a worker.
+        with requests.get(f"{RecordingUrl}.wav", auth=auth, stream=True) as r:
             r.raise_for_status()
             with open(audio_filepath, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
         
         collection.update_one(
-            {'call_history.call_id': call_sid},
+            {'call_history.call_id': CallSid},
             {'$set': {'call_history.$.recording_url': audio_filepath}}
         )
         
-        return '', 200
+        return Response(status_code=200)
         
     except Exception as e:
         print(f"Error in handle_recording: {str(e)}")
-        return '', 200
+        return Response(status_code=200)
 
-@call_bp.route('/status', methods=['POST'])
-def call_status():
+@router.post('/status')
+async def call_status(
+    CallSid: str = Form(...),
+    CallStatus: str = Form(...),
+    CallDuration: int = Form(0)
+):
     try:
-        call_sid = request.form.get('CallSid')
-        call_status = request.form.get('CallStatus')
-        duration = request.form.get('CallDuration', 0)
-        
         collection = Customer.get_collection()
         collection.update_one(
-            {'call_history.call_id': call_sid},
+            {'call_history.call_id': CallSid},
             {
                 '$set': {
-                    'call_history.$.status': call_status,
-                    'call_history.$.duration': int(duration)
+                    'call_history.$.status': CallStatus,
+                    'call_history.$.duration': int(CallDuration)
                 }
             }
         )
-        
-        return '', 200
+        return Response(status_code=200)
     
     except Exception as e:
         print(f"Error in call_status: {str(e)}")
-        return '', 200
+        return Response(status_code=200)
 
-@call_bp.route('/handle-transfer-status', methods=['POST'])
-def handle_transfer_status():
+@router.post('/handle-transfer-status')
+async def handle_transfer_status(
+    CallSid: str = Form(...),
+    DialCallStatus: str = Form(...)
+):
     try:
-        call_sid = request.form.get('CallSid')
-        dial_status = request.form.get('DialCallStatus')
-        
         response = VoiceResponse()
         
-        if dial_status == 'completed':
+        if DialCallStatus == 'completed':
             response.say(
                 "Thank you for speaking with our specialist. Goodbye.",
                 voice='Polly.Aditi', language='en-IN'
             )
             response.hangup()
-        elif dial_status in ['no-answer', 'busy', 'failed', 'canceled']:
+        elif DialCallStatus in ['no-answer', 'busy', 'failed', 'canceled']:
             response.say(
                 "Our specialist is unavailable. We'll call you back. Goodbye.",
                 voice='Polly.Aditi', language='en-IN'
@@ -535,31 +528,31 @@ def handle_transfer_status():
         else:
             response.hangup()
 
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
     
     except Exception as e:
         print(f"Error in handle_transfer_status: {str(e)}")
         response = VoiceResponse()
         response.hangup()
-        return str(response), 200, {'Content-Type': 'text/xml'}
+        return Response(content=str(response), media_type="application/xml")
 
-@call_bp.route('/customers/<customer_id>', methods=['GET'])
-def get_customer(customer_id):
+@router.get('/customers/{customer_id}')
+async def get_customer(customer_id: str):
     try:
         customer = Customer.find_by_id(customer_id)
         if not customer:
-            return jsonify({'error': 'Customer not found'}), 404
+            return JSONResponse({'error': 'Customer not found'}, status_code=404)
         customer['_id'] = str(customer['_id'])
-        return jsonify(customer), 200
+        return customer
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return JSONResponse({'error': str(e)}, status_code=500)
 
-@call_bp.route('/customers/<customer_id>/call-history', methods=['GET'])
-def get_call_history(customer_id):
+@router.get('/customers/{customer_id}/call-history')
+async def get_call_history(customer_id: str):
     try:
         customer = Customer.find_by_id(customer_id)
         if not customer:
-            return jsonify({'error': 'Customer not found'}), 404
+            return JSONResponse({'error': 'Customer not found'}, status_code=404)
         
         call_history = customer.get('call_history', [])
         formatted_history = []
@@ -582,12 +575,12 @@ def get_call_history(customer_id):
             }
             formatted_history.append(formatted_call)
         
-        return jsonify({
+        return {
             'customer_id': customer_id,
             'customer_name': customer.get('name'),
             'total_calls': len(call_history),
             'call_history': formatted_history
-        }), 200
+        }
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return JSONResponse({'error': str(e)}, status_code=500)
