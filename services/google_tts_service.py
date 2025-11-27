@@ -2,7 +2,7 @@ import os
 import base64
 from google.cloud import texttospeech
 from config import Config
-from language_config import LanguageConfig  # <-- Make sure this is imported
+from language_config import LanguageConfig
 
 class GoogleTTSService:
     def __init__(self):
@@ -22,37 +22,48 @@ class GoogleTTSService:
             print(error_msg)
             raise Exception(error_msg)
     
-    def synthesize_speech(self, text, language='en'):
+    def synthesize_speech(self, text, language='en', voice_override=None):
         """
         Synthesize speech using Google Cloud TTS.
-        Returns base64 encoded audio or raises exception.
+        Accepts voice_override to force a specific voice (e.g. for hybrid mode).
         """
         if not self.client:
             raise Exception("Google TTS client not initialized")
         
         try:
-            # --- START OF MODIFICATION ---
-            
-            # 1. Get the full TTS configuration dictionary
+            # 1. Get default config for the content language
             tts_config = LanguageConfig.get_tts_config(language)
             
             synthesis_input = texttospeech.SynthesisInput(text=text)
             
-            # 2. Use the tts_config to build the voice parameters
+            # 2. Determine Voice Name and Language Code
+            if voice_override:
+                voice_name = voice_override
+                # CRITICAL FIX: If using a fixed voice (e.g. en-IN-Vindemiatrix), 
+                # we MUST use a compatible language code (en-IN), even if the text is Hindi.
+                # Google's Chirp models are polyglot and will handle the script switching.
+                if 'en-IN' in voice_override:
+                    lang_code = 'en-IN'
+                elif 'hi-IN' in voice_override:
+                    lang_code = 'hi-IN'
+                else:
+                    lang_code = tts_config['language_code']
+            else:
+                voice_name = tts_config['voice_name']
+                lang_code = tts_config['language_code']
+
+            # 3. Build Parameters
             voice = texttospeech.VoiceSelectionParams(
-                language_code=tts_config['language_code'],
-                name=tts_config['voice_name']
+                language_code=lang_code,
+                name=voice_name
             )
             
-            # 3. Use the tts_config to build the audio parameters
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
-                speaking_rate=tts_config['speaking_rate'], # <-- Now correctly fetched
+                speaking_rate=tts_config['speaking_rate'],
                 pitch=0.0,
                 effects_profile_id=['telephony-class-application']
             )
-            
-            # --- END OF MODIFICATION ---
             
             response = self.client.synthesize_speech(
                 input=synthesis_input,
@@ -61,12 +72,11 @@ class GoogleTTSService:
             )
             
             audio_base64 = base64.b64encode(response.audio_content).decode('utf-8')
-            print(f"✓ Google TTS synthesized: {len(text)} chars in {language}")
+            print(f"✓ Google TTS synthesized: {len(text)} chars | Voice: {voice_name}")
             return audio_base64
             
         except Exception as e:
             print(f"✗ Error synthesizing speech: {e}")
             raise Exception(f"Google TTS synthesis failed: {e}")
 
-# This line remains the same, creating a single instance for your app
 google_tts_service = GoogleTTSService()

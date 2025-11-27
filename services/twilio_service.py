@@ -84,10 +84,11 @@ class TwilioService:
             print(f"✗ Error saving audio file: {e}")
             raise Exception(f"Failed to save audio: {e}")
     
-    def _create_say_element(self, response, text, language='en'):
+    def _create_say_element(self, response, text, language='en', voice_override=None):
         normalized_text = self._normalize_script_for_tts(text)
         try:
-            audio_base64 = google_tts_service.synthesize_speech(normalized_text, language)
+            # Pass voice_override to Google TTS
+            audio_base64 = google_tts_service.synthesize_speech(normalized_text, language, voice_override)
             filename = f"{uuid.uuid4().hex}.mp3"
             audio_url = self._save_audio_file(audio_base64, filename)
             print(f"[GOOGLE TTS] Playing: {audio_url}")
@@ -96,71 +97,44 @@ class TwilioService:
             print(f"✗ CRITICAL: Google TTS failed: {e}")
             raise Exception(f"Google Cloud TTS synthesis failed: {e}")
     
-    def generate_language_selection_twiml(self, customer_id, is_repeat=False):
-        response = VoiceResponse()
-        
-        # Play audio FIRST (No Barge-in during greeting)
-        if is_repeat:
-            message = LanguageConfig.IVR_INVALID_MESSAGE + " " + LanguageConfig.IVR_REPEAT_MESSAGE
-        else:
-            message = LanguageConfig.IVR_WELCOME_MESSAGE
-            
-        self._create_say_element(response, message, 'hi')
-
-        # Then Gather
-        gather = Gather(
-            action=f'{Config.BASE_URL}/api/call/language-selected?customer_id={customer_id}',
-            method='POST',
-            input='dtmf',
-            timeout=LanguageConfig.IVR_MENU['timeout'],
-            num_digits=LanguageConfig.IVR_MENU['num_digits'],
-            finish_on_key=LanguageConfig.IVR_MENU['finish_on_key']
-        )
-        response.append(gather)
-        
-        response.redirect(f'{Config.BASE_URL}/api/call/language-selected?customer_id={customer_id}', method='POST')
-        return str(response)
-    
-    def generate_initial_twiml(self, script_text, customer_id, language='en'):
+    def generate_initial_twiml(self, script_text, customer_id, language='en', voice_override=None):
         """Generate initial TwiML - Play audio THEN listen"""
         response = VoiceResponse()
         
-        # 1. Play the bot's message completely first
-        # This prevents background noise from interrupting the bot
-        self._create_say_element(response, script_text, language)
+        # 1. Play the bot's message (with voice override if provided)
+        self._create_say_element(response, script_text, language, voice_override)
         
         stt_config = LanguageConfig.get_stt_config(language)
         
-        # 2. Start listening ONLY after audio finishes
+        # 2. Listen
         gather = Gather(
             action=f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST',
             input='speech',
-            timeout=4, # Wait 4s for user to start speaking
-            speech_timeout='auto', # Intelligent silence detection
+            timeout=4,
+            speech_timeout='auto',
             language=stt_config['language'],
-            speechModel='phone_call', # Optimized for telephony audio
-            enhanced=True, # Better noise suppression
+            speechModel='phone_call',
+            enhanced=True,
             hints=stt_config['hints']
         )
         response.append(gather)
         
-        # Fallback if no speech detected
         response.redirect(f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}', method='POST')
         
         print(f"[TWILIO] Generated initial TwiML in {language}")
         return str(response)
     
-    def generate_followup_twiml(self, followup_text, customer_id, language='en'):
-        """Generate follow-up TwiML - Play audio THEN listen"""
+    def generate_followup_twiml(self, followup_text, customer_id, language='en', voice_override=None):
+        """Generate follow-up TwiML"""
         response = VoiceResponse()
         
-        # 1. Play audio first
-        self._create_say_element(response, followup_text, language)
+        # 1. Play audio (with override)
+        self._create_say_element(response, followup_text, language, voice_override)
         
         stt_config = LanguageConfig.get_stt_config(language)
         
-        # 2. Listen after audio completes
+        # 2. Listen
         gather = Gather(
             action=f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
             method='POST',
@@ -179,9 +153,9 @@ class TwilioService:
         print(f"[TWILIO] Generated followup TwiML in {language}")
         return str(response)
     
-    def generate_goodbye_twiml(self, text, language='en'):
+    def generate_goodbye_twiml(self, text, language='en', voice_override=None):
         response = VoiceResponse()
-        self._create_say_element(response, text, language)
+        self._create_say_element(response, text, language, voice_override)
         response.hangup()
         return str(response)
     
@@ -190,9 +164,9 @@ class TwilioService:
         response.hangup()
         return str(response)
     
-    def generate_transfer_twiml(self, text, language='en'):
+    def generate_transfer_twiml(self, text, language='en', voice_override=None):
         response = VoiceResponse()
-        self._create_say_element(response, text, language)
+        self._create_say_element(response, text, language, voice_override)
         
         if not Config.AGENT_PHONE_NUMBER:
             response.hangup()
@@ -208,8 +182,8 @@ class TwilioService:
         
         return str(response)
     
-    def generate_say_and_redirect_twiml(self, text, redirect_url, language='en'):
+    def generate_say_and_redirect_twiml(self, text, redirect_url, language='en', voice_override=None):
         response = VoiceResponse()
-        self._create_say_element(response, text, language)
+        self._create_say_element(response, text, language, voice_override)
         response.redirect(redirect_url, method='POST')
         return str(response)
