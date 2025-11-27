@@ -24,7 +24,7 @@ twilio_service = TwilioService()
 if not os.path.exists('data'):
     os.makedirs('data')
 
-# --- 1. UPDATED PYDANTIC MODEL ---
+# --- PYDANTIC MODEL (Preserved) ---
 class InitiateCallRequest(BaseModel):
     customer_id: str
     language: Optional[str] = None  # Optional, defaults to Config.DEFAULT_LANGUAGE if None
@@ -70,7 +70,7 @@ async def initiate_call(request: InitiateCallRequest):
                 'duration': 0,
                 'recording_url': None,
                 'call_state': 'CONNECTING',
-                'language': target_language,  # <--- SAVING REQUESTED LANGUAGE
+                'language': target_language,
                 'transfer_attempted': False,
                 'unclear_count': 0,
                 'context': {}
@@ -167,7 +167,6 @@ async def generate_greeting(
                 call_record = call
                 break
         
-        # Use the stored language, fallback to Config default if missing
         language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
         print(f"[DEBUG] Generating greeting in language: {language}")
 
@@ -283,15 +282,18 @@ async def process_response(
             
             if intent == 'CONFIRMED_IDENTITY':
                 next_state = 'PRESENTING_DETAILS'
-                transition = (
-                    "One moment while I pull up your account details." if language == 'en' else 
-                    "एक मोमेंट रुकें जब तक मैं आपके अकाउंट की डिटेल्स निकालती हूं।"
-                )
+                
+                # --- CHANGE START: REMOVED FILLER PHRASE ---
+                # Old code had: transition = "One moment..."
+                # Now we just say the acknowledgment (e.g., "Thank you") and redirect immediately
+                
                 redirect_url = f"{Config.BASE_URL}/api/call/present-details?customer_id={customer_id}"
+                
+                # Play acknowledgment ("Thank you") then redirect to /present-details for EMI script
                 twiml = twilio_service.generate_say_and_redirect_twiml(
-                    followup_text + " " + transition, redirect_url, language
+                    followup_text, redirect_url, language
                 )
-                followup_text = followup_text + " " + transition
+                # --- CHANGE END ---
             
             elif intent in ['DENIED_IDENTITY', 'NOT_INTERESTED']:
                 next_state = 'HANGUP'
