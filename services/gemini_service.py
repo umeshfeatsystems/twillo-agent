@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         # English Regex Patterns
         self.INTENT_PATTERNS_EN = {

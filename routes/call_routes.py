@@ -5,11 +5,13 @@ from models.customer import Customer
 from services.gemini_service import GeminiService
 from services.twilio_service import TwilioService
 from config import Config
+from language_config import LanguageConfig
 from datetime import datetime
 import os
 import requests
 import traceback
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
+from typing import Optional
 
 # Initialize Router
 router = APIRouter(prefix="/api/call", tags=["Call Logic"])
@@ -22,14 +24,25 @@ twilio_service = TwilioService()
 if not os.path.exists('data'):
     os.makedirs('data')
 
-# Pydantic Model for Initiate Call
+# --- 1. UPDATED PYDANTIC MODEL ---
 class InitiateCallRequest(BaseModel):
     customer_id: str
+    language: Optional[str] = None  # Optional, defaults to Config.DEFAULT_LANGUAGE if None
+
+    @validator('language')
+    def validate_language(cls, v):
+        if v is not None and not LanguageConfig.is_valid_language(v):
+            valid_langs = list(LanguageConfig.SUPPORTED_LANGUAGES.keys())
+            raise ValueError(f"Unsupported language '{v}'. Supported: {valid_langs}")
+        return v
 
 @router.post('/initiate')
 async def initiate_call(request: InitiateCallRequest):
     try:
         customer_id = request.customer_id
+        
+        # Determine language: Request Body > Config Default
+        target_language = request.language if request.language else Config.DEFAULT_LANGUAGE
         
         customer = Customer.find_by_id(customer_id)
         if not customer:
@@ -38,13 +51,14 @@ async def initiate_call(request: InitiateCallRequest):
         if customer['bank_details']['pending_emi_amount'] <= 0:
             return JSONResponse({'error': 'No pending EMI for this customer'}, status_code=400)
         
-        # Initiate Call
+        # Initiate Call via Twilio
         call_result = twilio_service.initiate_call(
             customer['phone'],
             customer['customer_id']
         )
         
         if call_result['success']:
+            # Create Call Record with the SELECTED Language
             call_record = {
                 'call_id': call_result['call_sid'],
                 'call_ref': call_result['call_ref'],
@@ -56,7 +70,7 @@ async def initiate_call(request: InitiateCallRequest):
                 'duration': 0,
                 'recording_url': None,
                 'call_state': 'CONNECTING',
-                'language': Config.DEFAULT_LANGUAGE,
+                'language': target_language,  # <--- SAVING REQUESTED LANGUAGE
                 'transfer_attempted': False,
                 'unclear_count': 0,
                 'context': {}
@@ -69,11 +83,13 @@ async def initiate_call(request: InitiateCallRequest):
                 'message': f"Call initiated to {customer['name']}",
                 'call_sid': call_result['call_sid'],
                 'call_ref': call_result['call_ref'],
-                'language': Config.DEFAULT_LANGUAGE
+                'language': target_language
             }
         else:
             return JSONResponse({'success': False, 'error': call_result['error']}, status_code=500)
     
+    except ValueError as ve:
+        return JSONResponse({'error': str(ve)}, status_code=400)
     except Exception as e:
         print(f"Error in initiate_call: {str(e)}")
         return JSONResponse({'error': str(e)}, status_code=500)
@@ -96,11 +112,12 @@ async def serve_tts_audio(filename: str):
 @router.post('/handle-answer')
 async def handle_answer(
     customer_id: str,
+    call_ref: str = None, 
     CallSid: str = Form(...),
     AnsweredBy: str = Form('human')
 ):
     try:
-        print(f"[DEBUG] handle-answer called: CallSid={CallSid}, customer_id={customer_id}")
+        print(f"[DEBUG] handle-answer called: CallSid={CallSid}, customer_id={customer_id}, call_ref={call_ref}")
         
         if AnsweredBy != 'human':
             print(f"Answering machine detected for {CallSid}")
@@ -137,23 +154,26 @@ async def generate_greeting(
         
         customer = Customer.find_by_id(customer_id)
         if not customer:
+            print("Error: Customer not found")
             response = VoiceResponse()
             response.say("We're having trouble retrieving your details.")
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
 
+        # Retrieve the language set during initiate_call
         call_record = None
         for call in customer.get('call_history', []):
             if call.get('call_id') == CallSid:
                 call_record = call
                 break
         
+        # Use the stored language, fallback to Config default if missing
         language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
-        
+        print(f"[DEBUG] Generating greeting in language: {language}")
+
         script = gemini_service.generate_verification_script(
             customer, Config.BANK_NAME, language
         )
-        print(f"[DEBUG] Generated script: {script[:100]}...")
         
         interaction_record = {
             'timestamp': datetime.utcnow().isoformat(),
@@ -463,8 +483,6 @@ async def handle_recording(
         
         auth = (Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         
-        # We can use BackgroundTasks for this, but for now simple sync request is safer
-        # to ensure it completes. In a high-load system, offload this to a worker.
         with requests.get(f"{RecordingUrl}.wav", auth=auth, stream=True) as r:
             r.raise_for_status()
             with open(audio_filepath, 'wb') as f:
