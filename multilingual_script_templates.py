@@ -1,6 +1,6 @@
 """
 Multi-lingual Script Templates with Dynamic Context Handling
-Production-Ready Version 4.1 - Restored Polite Endings + Native Hindi Engine
+Production-Ready Version 4.2 - End-to-End Scenarios
 """
 from config import Config
 from datetime import datetime
@@ -8,7 +8,6 @@ import re
 
 class MultilingualScriptTemplates:
     
-    # --- NATIVE HINDI NUMBER LOGIC (0-100) ---
     HINDI_NUMS_0_100 = {
         0: 'शून्य', 1: 'एक', 2: 'दो', 3: 'तीन', 4: 'चार', 5: 'पाँच', 6: 'छह', 7: 'सात', 8: 'आठ', 9: 'नौ',
         10: 'दस', 11: 'ग्यारह', 12: 'बारह', 13: 'तेरह', 14: 'चौदह', 15: 'पंद्रह', 16: 'सोलह', 17: 'सत्रह', 18: 'अठारह', 19: 'उन्नीस',
@@ -48,7 +47,7 @@ class MultilingualScriptTemplates:
     }
     
     VERIFICATION_RESPONSES = {
-        'en': { 'CONFIRMED_IDENTITY': ["Great. Thank you.", "Perfect. Thanks.", "Thank you, {customer_name}."], 'DENIED_IDENTITY': ["Apologies. We will update our records. Goodbye.", "Sorry for the inconvenience. Thank you."], 'NOT_INTERESTED': ["I understand. I'll note that. Have a good day.", "No problem. Updating preferences. Goodbye."], 'CONFUSION': ["Calling from {bank_name} for {customer_name}. Are they available?", "This is for {customer_name} regarding their account."], 'UNCLEAR': ["Sorry, is this {customer_name}?", "Could you confirm if this is {customer_name}?"], 'ASK_WHO_ARE_YOU': ["Calling from {bank_name} collections. Are you {customer_name}?", "Routine call from {bank_name}. Are you {customer_name}?"], 'ASK_SOURCE_OF_INFO': ["Calling the registered number for your loan. Are you {customer_name}?", "Number listed in {bank_name} records. Is this {customer_name}?"] },
+        'en': { 'CONFIRMED_IDENTITY': ["Great. Thank you.", "Perfect. Thanks.", "Thank you, {customer_name}."], 'DENIED_IDENTITY': ["Apologies. We will update our records, Goodbye.", "Sorry for the inconvenience. Thank you."], 'NOT_INTERESTED': ["I understand. I'll note that. Have a good day.", "No problem. Updating preferences. Goodbye."], 'CONFUSION': ["Calling from {bank_name} for {customer_name}. Are they available?", "This is for {customer_name} regarding their account."], 'UNCLEAR': ["Sorry, is this {customer_name}?", "Could you confirm if this is {customer_name}?"], 'ASK_WHO_ARE_YOU': ["Calling from {bank_name} collections. Are you {customer_name}?", "Routine call from {bank_name}. Are you {customer_name}?"], 'ASK_SOURCE_OF_INFO': ["Calling the registered number for your loan. Are you {customer_name}?", "Number listed in {bank_name} records. Is this {customer_name}?"] },
         'hi': { 'CONFIRMED_IDENTITY': ["धन्यवाद।", "जी शुक्रिया।", "धन्यवाद {customer_name} जी।"], 'DENIED_IDENTITY': ["माफ़ी चाहती हूँ। रिकॉर्ड अपडेट कर देंगे। नमस्ते।", "क्षमा करें। धन्यवाद।"], 'NOT_INTERESTED': ["समझ गई। नोट कर लिया है। नमस्ते।", "कोई बात नहीं। ठीक है। नमस्ते।"], 'CONFUSION': ["{bank_name} से {customer_name} जी के लिए कॉल है। क्या वो हैं?", "यह {customer_name} जी के लिए कॉल है।"], 'UNCLEAR': ["माफ़ कीजिये, क्या यह {customer_name} जी हैं?", "क्या आप {customer_name} जी बोल रहे हैं?"], 'ASK_WHO_ARE_YOU': ["{bank_name} से बोल रही हूँ। क्या आप {customer_name} जी हैं?", "{bank_name} की ज़रूरी कॉल है। क्या आप {customer_name} जी हैं?"], 'ASK_SOURCE_OF_INFO': ["बैंक में यह नंबर रजिस्टर्ड है। क्या आप {customer_name} जी हैं?", "यह जानकारी बैंक से मिली है। क्या मैं {customer_name} जी से बात कर रही हूँ?"] }
     }
     
@@ -59,6 +58,16 @@ class MultilingualScriptTemplates:
     
     CONVERSATION_RESPONSES = {
         'en': { 
+            # --- PHASE 2 SCENARIOS (BUSY/SAFETY/TIME) ---
+            'DRIVING_SAFETY': ["I understand you are driving. Safety is first. I will call you back later. Please drive safe.", "Oh, please focus on the road. I'll call another time. Drive safe."],
+            'BUSY_CALLBACK_LATER': ["No problem. I've noted to call you back at {callback_time}. Have a good day.", "Understood. I will call you at {callback_time}. Thank you."],
+            
+            # --- PHASE 5 SCENARIOS (CHANNEL/BOT) ---
+            'IS_BOT': ["I am a virtual assistant from {bank_name}, here to help you with your account.", "I'm an automated assistant calling on behalf of {bank_name}."],
+            'SEND_WHATSAPP': ["Sure. I will send the details on WhatsApp immediately.", "Okay, sending the payment link via WhatsApp now."],
+            'WRONG_NUMBER': ["I apologize. I will update our records. Sorry for the disturbance.", "My mistake. We will remove this number. Goodbye."],
+            
+            # --- EXISTING SCENARIOS ---
             'WILL_PAY_NOW': ["Excellent. Thank you {customer_name}. I'll send a payment link to your registered number right away... Is there anything else I can assist you with?", "Great choice. I am triggering a payment link to your mobile now. Once paid, you will receive a confirmation SMS."], 
             'WILL_PAY_LATER': ["Understood {customer_name}. I have updated the system with this new date.", "Okay. I have noted that you will pay on {commitment_date}. Please ensure the payment is made by then to avoid charges."], 
             'ALREADY_PAID': ["Thank you for letting me know {customer_name}. I will ask our team to verify this transaction... Is there any other query I can resolve for you?"], 
@@ -67,13 +76,8 @@ class MultilingualScriptTemplates:
             'REQUEST_EXTENSION': ["Absolutely {customer_name}. I can help with that... Based on your request, I'm noting an extension till {commitment_date}... You'll receive a confirmation message shortly... Is there anything else I can assist you with?"], 
             'REQUEST_PAYMENT_PLAN': ["Of course {customer_name}. We can definitely set up a payment plan for you... Would you prefer to split this into two installments or three smaller payments? I'll arrange whichever works best for your situation... Let me know your preference."], 
             'DEMANDS_SUPERVISOR': ["I completely understand {customer_name}. Let me transfer you to a specialist right away... Please hold for just a moment."], 
-            # RESTORED POLITE EXIT
             'POLITE_EXIT': ["Thank you so much for your time {customer_name}. We'll send you all the payment details on your registered number shortly... Have a wonderful day. Goodbye!", "Thank you for speaking with {bank_name}. Have a great day."], 
             'UNCLEAR': ["I'm sorry, I didn't quite catch that... Could you please repeat? You can say things like 'I'll pay now', 'need more time', or 'speak to manager'... What would you like to do?"], 
-            'BUSY_CALLBACK_LATER': ["No problem at all {customer_name}. I apologize for the disturbance. I will call you back at a more convenient time. Have a good day.", "Understood. We'll try again later. Thank you."], 
-            'WRONG_NUMBER': ["I apologize sincerely for the disturbance. I will update our records immediately to remove this number. Sorry for the inconvenience. Goodbye.", "My mistake. We will remove this number from our system. Goodbye."], 
-            'IS_BOT': ["I am a virtual assistant calling from {bank_name}, here to help you with your account details.", "I'm an automated assistant calling on behalf of {bank_name}."], 
-            'SEND_WHATSAPP': ["Certainly. I will send the payment details to you on WhatsApp immediately.", "Okay, sending the payment link via WhatsApp right away."], 
             'CANT_PAY_REFUSAL': ["I understand this is difficult, but non-payment can seriously affect your credit score. I strongly suggest making even a small partial payment to keep your account active.", "I urge you to reconsider. Pending dues can lead to penalties. Can we arrange a small token payment today?"], 
             'ASK_AMOUNT': ["The current outstanding balance is rupees {amount}. Would you like to clear this today?", "You have a pending amount of rupees {amount}. Shall I send the payment link?"], 
             'ASK_DETAILS': ["I am calling regarding your {loan_type}. The pending amount is rupees {amount}, which was due on {due_date_spoken}. Would you like to make the payment now?", "Sure. This is regarding your {loan_type}. You have an overdue EMI of rupees {amount}. How would you like to proceed?"], 
@@ -83,6 +87,16 @@ class MultilingualScriptTemplates:
             'ASK_PAYMENT_DATE': ["When do you think you can make the payment?", "Could you please confirm a date for the payment?"] 
         },
         'hi': { 
+            # --- PHASE 2 SCENARIOS (BUSY/SAFETY/TIME) ---
+            'DRIVING_SAFETY': ["मैं समझती हूँ। आप ड्राइव कर रहे हैं। सेफ्टी ज़रूरी है। मैं बाद में कॉल करूँगी। ध्यान रखें।", "प्लीज़ रोड पर ध्यान दें। मैं बाद में कॉल करती हूँ।"],
+            'BUSY_CALLBACK_LATER': ["कोई बात नहीं। मैंने {callback_time} पर कॉल करने का नोट कर लिया है। नमस्ते।", "ठीक है। मैं {callback_time} पर कॉल करूँगी। धन्यवाद।"],
+            
+            # --- PHASE 5 SCENARIOS (CHANNEL/BOT) ---
+            'IS_BOT': ["मैं {bank_name} से एक वर्चुअल असिस्टेंट हूँ।", "मैं बैंक की तरफ से एक ऑटोमेटेड कॉल हूँ।"],
+            'SEND_WHATSAPP': ["ज़रूर। मैं आपको अभी व्हाट्सएप पर डिटेल भेज रही हूँ।", "ठीक है, व्हाट्सएप चेक करें।"],
+            'WRONG_NUMBER': ["माफ़ी चाहती हूँ। मैं यह नंबर हमारे रिकॉर्ड से हटा दूंगी। असुविधा के लिए खेद है।", "गलती के लिए माफ़ी। हम रिकॉर्ड अपडेट कर देंगे।"],
+
+            # --- EXISTING SCENARIOS ---
             'WILL_PAY_NOW': ["बहुत अच्छा। धन्यवाद {customer_name} जी। मैं आपके रजिस्टर्ड नंबर पर अभी पेमेंट लिंक भेज देती हूं... क्या मैं आपकी किसी और बात में मदद कर सकती हूं?", "धन्यवाद। मैंने एसएमएस के जरिए लिंक भेज दिया है। कृपया अपना इनबॉक्स चेक करें।"], 
             'WILL_PAY_LATER': ["ठीक है {customer_name} जी। {commitment_date} नोट कर लिया है। कृपया तब तक भुगतान सुनिश्चित करें।", "समझ गई। मैंने सिस्टम में अपडेट कर दिया है कि आप {commitment_date} को भुगतान करेंगे।"], 
             'ALREADY_PAID': ["मुझे बताने के लिए धन्यवाद {customer_name} जी। मैं हमारी टीम से इस ट्रांजेक्शन को वेरिफाई करने के लिए कहूंगी... क्या आपके पास कोई और सवाल है?"], 
@@ -91,13 +105,8 @@ class MultilingualScriptTemplates:
             'REQUEST_EXTENSION': ["बिल्कुल {customer_name} जी। मैं इसमें मदद कर सकती हूं... आपके अनुरोध के आधार पर, मैं {commitment_date} तक का एक्सटेंशन नोट कर रही हूं... आपको जल्द ही कन्फर्मेशन मैसेज मिल जाएगा... क्या कुछ और है जिसमें मैं आपकी मदद कर सकती हूं?"], 
             'REQUEST_PAYMENT_PLAN': ["बिल्कुल {customer_name} जी। हम निश्चित रूप से आपके लिए एक पेमेंट प्लान बना सकते हैं... क्या आप इसे दो किस्तों में या तीन छोटे भुगतानों में बांटना पसंद करेंगे? मैं जो भी आपकी स्थिति के लिए सबसे अच्छा हो वह व्यवस्था कर दूंगी... मुझे अपनी पसंद बताएं।"], 
             'DEMANDS_SUPERVISOR': ["मैं पूरी तरह समझती हूं {customer_name} जी। मैं आपको अभी एक स्पेशलिस्ट से जोड़ देती हूं... कृपया एक पल रुकें... वे आपकी बेहतर मदद कर पाएंगे।"], 
-            # RESTORED POLITE EXIT
             'POLITE_EXIT': ["आपके समय के लिए बहुत-बहुत धन्यवाद {customer_name} जी। हम आपको आपके रजिस्टर्ड नंबर पर जल्द ही सभी पेमेंट डिटेल भेज देंगे... आपका दिन शुभ हो। नमस्ते!", "{bank_name} से बात करने के लिए धन्यवाद। आपका दिन शुभ हो।"], 
             'UNCLEAR': ["क्षमा करें, मुझे ठीक से समझ नहीं आया... क्या आप कृपया दोहरा सकते हैं? आप कह सकते हैं 'अभी भरूंगा', 'और समय चाहिए', या 'मैनेजर से बात'... आप क्या करना चाहेंगे?"], 
-            'BUSY_CALLBACK_LATER': ["कोई बात नहीं {customer_name} जी। असुविधा के लिए खेद है। मैं आपको बाद में कॉल करूँगी। नमस्ते।", "ठीक है। हम बाद में बात करेंगे। धन्यवाद।"], 
-            'WRONG_NUMBER': ["माफ़ी चाहती हूँ। मैं यह नंबर हमारे रिकॉर्ड से हटा दूंगी। असुविधा के लिए खेद है। नमस्ते।", "गलती के लिए माफ़ी। हम अपने रिकॉर्ड अपडेट कर देंगे। धन्यवाद।"], 
-            'IS_BOT': ["मैं {bank_name} से एक वर्चुअल असिस्टेंट हूँ, आपकी अकाउंट डीटेल्स में मदद करने के लिए।", "मैं बैंक की तरफ से एक ऑटोमेटेड कॉल हूँ।"], 
-            'SEND_WHATSAPP': ["ज़रूर। मैं आपको अभी व्हाट्सएप पर पेमेंट डीटेल्स भेज रही हूँ।", "ठीक है, मैंने व्हाट्सएप पर लिंक भेज दिया है।"], 
             'CANT_PAY_REFUSAL': ["मैं समझती हूँ, लेकिन भुगतान न करने से आपका क्रेडिट स्कोर खराब हो सकता है। मेरी सलाह है कि आप कम से कम कुछ राशि जमा कर दें ताकि अकाउंट एक्टिव रहे।", "पेमेंट पेंडिंग रखने से पेनल्टी लग सकती है। क्या हम आज एक छोटा पेमेंट कर सकते हैं?"], 
             'ASK_AMOUNT': ["बकाया राशि {amount} रुपये है। क्या आप इसे आज जमा कर सकते हैं?", "आपका पेंडिंग अमाउंट {amount} रुपये है। क्या मैं पेमेंट लिंक भेज दूं?"], 
             'ASK_DETAILS': ["मैं {bank_name} से आपके {loan_type} के बारे में बात कर रही हूं। {amount} रुपये की राशि {due_date_spoken} को देय थी। क्या आप अभी भुगतान करना चाहेंगे?", "यह आपके {loan_type} के बारे में है। {due_date_spoken} को {amount} रुपये भरने थे। आप यह पेमेंट कब तक करेंगे?"], 
@@ -140,7 +149,7 @@ class MultilingualScriptTemplates:
                     text += f" {MultilingualScriptTemplates._convert_number_to_hindi(remainder)}"
                 return text
                 
-            return str(n) # Fallback for very large numbers
+            return str(n)
         except:
             return str(n)
 
@@ -155,14 +164,12 @@ class MultilingualScriptTemplates:
             month_name = MultilingualScriptTemplates.MONTH_NAMES[language].get(month, month)
             
             if language == 'en':
-                # English: "24th November 2025"
                 if day in [1, 21, 31]: day_suffix = 'st'
                 elif day in [2, 22]: day_suffix = 'nd'
                 elif day in [3, 23]: day_suffix = 'rd'
                 else: day_suffix = 'th'
                 return f"{day}{day_suffix} {month_name} {year}"
             else:
-                # Hindi: "चौबीस नवंबर दो हज़ार पच्चीस"
                 day_text = MultilingualScriptTemplates._convert_number_to_hindi(day)
                 year_text = MultilingualScriptTemplates._convert_number_to_hindi(year)
                 return f"{day_text} {month_name} {year_text}"
@@ -184,10 +191,8 @@ class MultilingualScriptTemplates:
             amount_val = int(float(amount))
             
             if language == 'hi':
-                # Use native converter
                 return MultilingualScriptTemplates._convert_number_to_hindi(amount_val)
             
-            # English formatting
             amount_str = str(amount_val)
             if len(amount_str) <= 3: return amount_str
             formatted = ""
@@ -267,12 +272,14 @@ class MultilingualScriptTemplates:
             'due_date_spoken': due_date_spoken,
             'extension_days': '15',
             'commitment_date': '',
-            'num_days': ''
+            'num_days': '',
+            'callback_time': 'later' # Default
         }
         
         if context:
             if 'commitment_date' in context: variables['commitment_date'] = context['commitment_date']
             if 'num_days' in context: variables['num_days'] = context['num_days']
+            if 'callback_time' in context: variables['callback_time'] = context['callback_time']
         
         if intent == 'WILL_PAY_LATER' and not variables.get('num_days'):
              if language == 'en': return "Perfect {customer_name}. I've noted that you'll make the payment soon. Is there anything else I can help you with?".format(**variables)

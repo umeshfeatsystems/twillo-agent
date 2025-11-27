@@ -9,14 +9,47 @@ from datetime import datetime, timedelta
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.5-pro')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         
-        # English Regex Patterns
+        # --- EXPANDED INTENT PATTERNS (Phase 2 & 3 Scenarios) ---
         self.INTENT_PATTERNS_EN = {
             'CONFIRMED_IDENTITY': [
                 r'\b(speaking|this is|myself)\b',
                 r'\b(i am)\b(?!\s*not)', 
                 r'\b(yes|yeah|correct|right)\b'
+            ],
+            # Driving/Safety is a specific high-priority subset of BUSY
+            'DRIVING_SAFETY': [
+                r'\b(driving|drive|riding|bike|car|traffic)\b',
+                r'\b(on the road|steering)\b'
+            ],
+            'BUSY_CALLBACK_LATER': [
+                r'\b(busy|meeting|eating|lunch|dinner|sleeping|work|office)\b',
+                r'\b(call|talk)\s+(later|after|tomorrow|evening|morning)',
+                r'\b(not)\s+(free|now)',
+                r'\b(call)\s+(me)\s+(at|in|on)',
+            ],
+            'WRONG_NUMBER': [
+                r'\b(wrong|incorrect)\s+(number|person)',
+                r'\b(don\'t know|dont know)\s+(him|her|them)',
+                r'\b(no one|nobody)\s+(by that name)',
+                r'\b(bought|new)\s+(sim|number)',
+            ],
+            'IS_BOT': [
+                r'\b(are you)\s+(a)?\s*(bot|robot|computer|machine|ai)',
+                r'\b(real|human)\s+(person|agent)',
+                r'\b(recording|automated)',
+            ],
+            'SEND_WHATSAPP': [
+                r'\b(whatsapp|whats app)\b',
+                r'\b(send|share)\s+(on|via)\s+(whatsapp)',
+            ],
+            'CANT_PAY_REFUSAL': [
+                r'\b(no|not)\s+(money|funds|cash)',
+                r'\b(broke|empty)\b',
+                r'\b(do|take)\s+(whatever|action)',
+                r'\b(sue|court|legal)',
+                r'\b(wont|will not|cannot)\s+(pay)',
             ],
             'WILL_PAY_NOW': [
                 r'\b(will|gonna|going to|can|would like to)\s+(pay|make payment|settle|clear)',
@@ -87,12 +120,42 @@ class GeminiService:
         
         # Hindi Regex Patterns
         self.INTENT_PATTERNS_HI = {
-            # MOVED TO TOP to prioritize Identity Confirmation over Polite Exit
             'CONFIRMED_IDENTITY': [
                 r'\b(main|mai|hum).*?(bol|baat).*?(raha|rahi)',
                 r'\b(speaking|hi|hoon|hun)\b',
                 r'\b(ha|haan|yes|ji|sahi)\b',
                 r'\b(bilkul|zarur|hanji)\b'
+            ],
+            'DRIVING_SAFETY': [
+                r'\b(drive|driving|gaadi|gadi|bike|car)\b',
+                r'\b(chala)\s+(raha|rahi)',
+                r'\b(raste|rasta|road)\s+(mein|pe)',
+                r'\b(traffic)\b',
+            ],
+            'BUSY_CALLBACK_LATER': [
+                r'\b(busy|vyast|kaam)\b',
+                r'\b(meeting|lunch|khana|baad mein)\b',
+                r'\b(call|baat)\s+(karo|karna|badme)',
+                r'\b(abhi)\s+(nahi)',
+                r'\b(baje|ghante|min|minutes)', # Time indicators
+            ],
+            'WRONG_NUMBER': [
+                r'\b(wrong|galat)\s+(number|insaan|aadmi)',
+                r'\b(nahi)\s+(janta|pehchanta|pata)',
+                r'\b(koi|kisi)\s+(aur|dusra)',
+            ],
+            'IS_BOT': [
+                r'\b(bot|robot|computer|machine|record|recording)\b',
+                r'\b(insaan|human|aadmi).*?(baat|bol)',
+            ],
+            'SEND_WHATSAPP': [
+                r'\b(whatsapp|watsapp)\b',
+            ],
+            'CANT_PAY_REFUSAL': [
+                r'\b(nahi|no)\s+(paisa|paise|money|funds)',
+                r'\b(jo|kuch).*?(karna|karlo|ukhaad)',
+                r'\b(nahi)\s+(pay|dunga|dungi)',
+                r'\b(mar|khatam|loss)\b',
             ],
             'WILL_PAY_NOW': [
                 r'\b(अभी|आज|तुरंत|अब).*?(भर|दे|कर|भुगतान|पे).*?(दूंगा|दूंगी|देंगे|दूँगी|दूँगा|रहा|रही|हूं|हूँ)',
@@ -168,7 +231,6 @@ class GeminiService:
     def _match_intent_heuristic(self, text, language='en'):
         text_lower = text.lower().strip()
         
-        # --- HYBRID LOGIC ---
         if language == 'en-hi-hybrid':
             # Check English Patterns First
             for intent, pattern_list in self.INTENT_PATTERNS_EN.items():
@@ -181,10 +243,9 @@ class GeminiService:
                 for pattern in pattern_list:
                     if re.search(pattern, text_lower, re.IGNORECASE):
                         return intent, 0.95, 'hi'
-            return None, 0.0, 'en-hi-hybrid' # Default if no match
+            return None, 0.0, 'en-hi-hybrid' 
             
         else:
-            # Standard single language logic
             patterns = self.INTENT_PATTERNS_EN if language == 'en' else self.INTENT_PATTERNS_HI
             for intent, pattern_list in patterns.items():
                 for pattern in pattern_list:
@@ -192,6 +253,44 @@ class GeminiService:
                         return intent, 0.95, language
             return None, 0.0, language
     
+    def _extract_callback_time(self, text, language='en'):
+        """Extract relative or absolute time for callback"""
+        text_lower = text.lower().strip()
+        now = datetime.now()
+        
+        # 1. Relative Minutes (10 min, aadhe ghante)
+        min_match = re.search(r'(\d+)\s*(min|minute)', text_lower)
+        if min_match:
+            return now + timedelta(minutes=int(min_match.group(1))), f"{min_match.group(1)} minutes"
+            
+        if 'half' in text_lower or 'aadhe' in text_lower or 'adhe' in text_lower:
+            return now + timedelta(minutes=30), "30 minutes"
+            
+        if 'hour' in text_lower or 'ghante' in text_lower or 'ghanta' in text_lower:
+            # Check number before 'hour'
+            hour_match = re.search(r'(\d+)\s*(hour|ghante|ghanta)', text_lower)
+            hours = int(hour_match.group(1)) if hour_match else 1
+            return now + timedelta(hours=hours), f"{hours} hour"
+
+        # 2. Absolute Time (5 pm, 5 baje)
+        time_match = re.search(r'(\d+)\s*(pm|am|baje)', text_lower)
+        if time_match:
+            hour = int(time_match.group(1))
+            period = time_match.group(2)
+            # Simple conversion logic
+            if 'pm' in period and hour < 12: hour += 12
+            # For 'baje', usually implies PM if small number in debt collection context, but let's assume raw
+            return now.replace(hour=hour, minute=0), f"{time_match.group(1)} {period}"
+
+        # 3. Vague (Tomorrow, Kal)
+        if 'tomorrow' in text_lower or 'kal' in text_lower:
+            return now + timedelta(days=1), "tomorrow"
+            
+        if 'evening' in text_lower or 'shaam' in text_lower:
+            return now.replace(hour=18, minute=0), "this evening"
+            
+        return None, None
+
     def _extract_date_commitment(self, text, language='en'):
         text_lower = text.lower().strip()
         num_days = -1 
@@ -216,7 +315,6 @@ class GeminiService:
         return None, None
     
     def generate_verification_script(self, customer_data, bank_name, language='en'):
-        # For hybrid, first line is ALWAYS English
         if language == 'en-hi-hybrid':
             lang_for_script = 'en'
         else:
@@ -227,25 +325,20 @@ class GeminiService:
     def analyze_verification(self, customer_response, customer_data, language='en'):
         print(f"[GEMINI/VERIFICATION/{language.upper()}] Analyzing: '{customer_response}'")
         
-        # --- HYBRID DETECTION LOGIC ---
         detected_lang = 'en' if language == 'en-hi-hybrid' else language
         
-        # Heuristics
         heuristic_intent, conf, detected_lang_from_heuristic = self._match_intent_heuristic(customer_response, language)
         
         if language == 'en-hi-hybrid' and detected_lang_from_heuristic in ['en', 'hi']:
             detected_lang = detected_lang_from_heuristic
             print(f"[HYBRID] Detected language via heuristic: {detected_lang}")
 
-        # Basic Word Matching (Updated for Hybrid & Hinglish)
         response_lower = customer_response.lower().strip()
         
         negative_words_en = ['no', 'not', 'wrong', 'incorrect', "isn't", "don't know", "none"]
-        # Added Hinglish negatives
         negative_words_hi = ['नहीं', 'गलत', 'wrong', 'no', 'nahi', 'mat', 'na', 'kaun', 'nahin', 'nhi', 'wrong number']
         
         positive_words_en = ['yes', 'yeah', 'correct', 'speaking', 'this is', 'i am', 'myself', 'yep']
-        # Added Hinglish positives (haan, bilkul, bol raha, etc.)
         positive_words_hi = [
             'हां', 'हा', 'जी', 'बोल रहा', 'में हूं', 'main hun', 'yes', 'मैं', 'sahi', 'yahi',
             'haan', 'han', 'bilkul', 'bol raha', 'bol rahi', 'hoon', 'hun', 'jee', 'ji', 'hanji'
@@ -260,7 +353,6 @@ class GeminiService:
         elif heuristic_intent:
              intent = heuristic_intent
         
-        # Get polite response in the DETECTED language
         polite_response = MultilingualScriptTemplates.get_verification_response(detected_lang, intent, Config.BANK_NAME, customer_data['name'])
         
         return {
@@ -276,7 +368,7 @@ class GeminiService:
     def get_bot_response(self, call_state, customer_response, customer_data, conversation_history, language='en'):
         print(f"[GEMINI/NLU/{language.upper()}] State={call_state}, Input='{customer_response}'")
         
-        # 1. Check Heuristics & Language Detection
+        # 1. Check Heuristics
         heuristic_intent, confidence, detected_lang = self._match_intent_heuristic(customer_response, language)
         
         if language == 'en-hi-hybrid':
@@ -287,10 +379,14 @@ class GeminiService:
         # 2. Check Date/Commitment
         commitment_date, num_days = self._extract_date_commitment(customer_response, language)
         
+        # 3. Check Callback Time (Smart Time Extraction)
+        callback_dt, callback_str = self._extract_callback_time(customer_response, language)
+
         intent = None
 
         # --- PRIORITY LOGIC ---
         priority_intents = [
+            'DRIVING_SAFETY', 'BUSY_CALLBACK_LATER', 'WRONG_NUMBER', 'IS_BOT', 'SEND_WHATSAPP', 'CANT_PAY_REFUSAL',
             'ASK_WHO_ARE_YOU', 'ASK_SOURCE_OF_INFO', 'ASK_DETAILS', 
             'ASK_AMOUNT', 'REPEAT_DETAILS', 'DISPUTE_AMOUNT', 
             'REQUEST_PAYMENT_PLAN', 'DEMANDS_SUPERVISOR', 'FACING_FINANCIAL_ISSUES'
@@ -317,16 +413,29 @@ class GeminiService:
             if len(customer_response.split()) < 3 and current_response_lang == 'hi' and 'ha' in customer_response.lower(): intent = 'POLITE_EXIT' 
             else: intent = 'UNCLEAR' 
 
-        return self._build_response(intent, call_state, customer_data, conversation_history, customer_response, current_response_lang, commitment_date=commitment_date, num_days=num_days)
+        return self._build_response(intent, call_state, customer_data, conversation_history, customer_response, current_response_lang, commitment_date=commitment_date, num_days=num_days, callback_str=callback_str)
 
-    def _build_response(self, intent, call_state, customer_data, conversation_history, customer_response, language='en', next_state=None, should_transfer=False, context=None, commitment_date=None, num_days=None):
+    def _build_response(self, intent, call_state, customer_data, conversation_history, customer_response, language='en', next_state=None, should_transfer=False, context=None, commitment_date=None, num_days=None, callback_str=None):
         if not context: context = {}
         if commitment_date:
             context['commitment_date'] = MultilingualScriptTemplates.format_date_for_speech(commitment_date.strftime("%Y-%m-%d"), language)
             context['num_days'] = num_days
         
+        # Inject callback time into context for the template
+        if callback_str:
+            context['callback_time'] = callback_str
+        
         if not next_state:
-            if intent == 'POLITE_EXIT': next_state = 'HANGUP'
+            # Handle End-to-End Scenarios
+            if intent == 'DRIVING_SAFETY': next_state = 'HANGUP' # Safe disconnect
+            elif intent == 'BUSY_CALLBACK_LATER': next_state = 'HANGUP' # Polite disconnect
+            elif intent == 'WRONG_NUMBER': next_state = 'HANGUP'
+            elif intent == 'POLITE_EXIT': next_state = 'HANGUP'
+            elif intent == 'SEND_WHATSAPP': next_state = 'CONVERSATION' # Confirm and ask if anything else
+            elif intent == 'IS_BOT': next_state = 'CONVERSATION'
+            elif intent == 'CANT_PAY_REFUSAL': next_state = 'OFFERING_SOLUTIONS'
+            
+            # Standard Flows
             elif intent in ['ASK_WHO_ARE_YOU', 'ASK_SOURCE_OF_INFO', 'ASK_DETAILS', 'REPEAT_DETAILS', 'ASK_AMOUNT', 'DISPUTE_AMOUNT', 'REQUEST_PAYMENT_PLAN', 'FACING_FINANCIAL_ISSUES']: next_state = 'CONVERSATION' 
             elif intent == 'WILL_PAY_NOW': next_state = 'CONVERSATION' 
             elif intent in ['WILL_PAY_LATER', 'REQUEST_EXTENSION', 'ALREADY_PAID', 'CONFIRMED_IDENTITY']: next_state = 'CONVERSATION'
