@@ -25,7 +25,6 @@ class GoogleTTSService:
     def synthesize_speech(self, text, language='en', voice_override=None):
         """
         Synthesize speech using Google Cloud TTS.
-        Accepts voice_override to force a specific voice (e.g. for hybrid mode).
         """
         if not self.client:
             raise Exception("Google TTS client not initialized")
@@ -36,23 +35,23 @@ class GoogleTTSService:
             
             synthesis_input = texttospeech.SynthesisInput(text=text)
             
-            # 2. Determine Voice Name and Language Code
+            # 2. Determine Voice Name
             if voice_override:
                 voice_name = voice_override
-                # CRITICAL FIX: If using a fixed voice (e.g. en-IN-Vindemiatrix), 
-                # we MUST use a compatible language code (en-IN), even if the text is Hindi.
-                # Google's Chirp models are polyglot and will handle the script switching.
-                if 'en-IN' in voice_override:
-                    lang_code = 'en-IN'
-                elif 'hi-IN' in voice_override:
-                    lang_code = 'hi-IN'
-                else:
-                    lang_code = tts_config['language_code']
             else:
                 voice_name = tts_config['voice_name']
+
+            # 3. AUTO-DETECT Language Code from Voice Name
+            # This is the fail-safe. If we are using an 'en-IN' voice (Sadaltager),
+            # we MUST tell Google the request is 'en-IN', even if the text is Hindi.
+            if 'en-IN' in voice_name:
+                lang_code = 'en-IN'
+            elif 'hi-IN' in voice_name:
+                lang_code = 'hi-IN'
+            else:
                 lang_code = tts_config['language_code']
 
-            # 3. Build Parameters
+            # 4. Build Parameters
             voice = texttospeech.VoiceSelectionParams(
                 language_code=lang_code,
                 name=voice_name
@@ -72,7 +71,7 @@ class GoogleTTSService:
             )
             
             audio_base64 = base64.b64encode(response.audio_content).decode('utf-8')
-            print(f"✓ Google TTS synthesized: {len(text)} chars | Voice: {voice_name}")
+            print(f"✓ Google TTS synthesized: {len(text)} chars | Voice: {voice_name} | Code: {lang_code}")
             return audio_base64
             
         except Exception as e:

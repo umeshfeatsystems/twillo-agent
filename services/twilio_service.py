@@ -64,6 +64,8 @@ class TwilioService:
             }
     
     def _normalize_script_for_tts(self, text):
+        if not text:
+            return ""
         text = ' '.join(text.split())
         if text and text[-1] not in '.!?':
             text += '.'
@@ -85,6 +87,12 @@ class TwilioService:
             raise Exception(f"Failed to save audio: {e}")
     
     def _create_say_element(self, response, text, language='en', voice_override=None):
+        # CRITICAL FIX: Prevent empty text from crashing Google TTS
+        if not text or not text.strip():
+            print("⚠ Warning: Empty text passed to TTS. Playing silence/fallback.")
+            response.pause(length=1)
+            return
+
         normalized_text = self._normalize_script_for_tts(text)
         try:
             # Pass voice_override to Google TTS
@@ -95,7 +103,8 @@ class TwilioService:
             response.play(audio_url)
         except Exception as e:
             print(f"✗ CRITICAL: Google TTS failed: {e}")
-            raise Exception(f"Google Cloud TTS synthesis failed: {e}")
+            # Fallback: Use Twilio's basic TTS or silence if Google fails
+            response.say("I am having trouble connecting. One moment.")
     
     def generate_initial_twiml(self, script_text, customer_id, language='en', voice_override=None, stt_language=None):
         """Generate initial TwiML - Play audio THEN listen"""
@@ -121,6 +130,7 @@ class TwilioService:
         )
         response.append(gather)
         
+        # If no input, redirect to process-response with empty speech to trigger "Hello?" logic
         response.redirect(f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}', method='POST')
         
         print(f"[TWILIO] Generated initial TwiML. TTS: {language} | STT: {target_stt_lang}")
@@ -128,33 +138,7 @@ class TwilioService:
     
     def generate_followup_twiml(self, followup_text, customer_id, language='en', voice_override=None, stt_language=None):
         """Generate follow-up TwiML"""
-        response = VoiceResponse()
-        
-        # 1. Play audio (TTS uses 'language')
-        self._create_say_element(response, followup_text, language, voice_override)
-        
-        # 2. Listen (STT uses 'stt_language' if provided, else defaults to 'language')
-        # CRITICAL FIX: This allows us to speak Hindi but listen in Hybrid mode
-        target_stt_lang = stt_language if stt_language else language
-        stt_config = LanguageConfig.get_stt_config(target_stt_lang)
-        
-        gather = Gather(
-            action=f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}',
-            method='POST',
-            input='speech',
-            timeout=4,
-            speech_timeout='auto',
-            language=stt_config['language'],
-            speechModel='phone_call',
-            enhanced=True,
-            hints=stt_config['hints']
-        )
-        response.append(gather)
-        
-        response.redirect(f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}', method='POST')
-        
-        print(f"[TWILIO] Generated followup TwiML. TTS: {language} | STT: {target_stt_lang}")
-        return str(response)
+        return self.generate_initial_twiml(followup_text, customer_id, language, voice_override, stt_language)
     
     def generate_goodbye_twiml(self, text, language='en', voice_override=None):
         response = VoiceResponse()
