@@ -295,14 +295,18 @@ class GeminiService:
         text_lower = text.lower().strip()
         num_days = -1 
         
-        digit_pattern = r'(\d+)\s*(day|days|din|दिन|रोज)'
+        # Improved: Capture "200 days", "10 din", "5 roj" - Recognizes large digits automatically
+        digit_pattern = r'(\d+)\s*(day|days|din|dino|दिन|रोज)'
         digit_match = re.search(digit_pattern, text_lower)
         if digit_match: num_days = int(digit_match.group(1))
         
         if num_days == -1:
+            # Fallback for common word-numbers if regex didn't catch digit
+            # NOTE: STT usually outputs "200" as digits, so strict word-matching for large numbers is rarely needed
             hindi_nums = {'ek': 1, 'do': 2, 'teen': 3, 'chaar': 4, 'char': 4, 'paanch': 5, 'das': 10, 'एक': 1, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'दस': 10}
             for word, val in hindi_nums.items():
-                if (f"{word} din" in text_lower or f"{word} days" in text_lower or f"{word} दिन" in text_lower):
+                # Checking boundary to ensure we don't match substrings like 'do' in 'doing'
+                if re.search(rf'\b{word}\b\s*(din|days|दिन)', text_lower):
                     num_days = val; break
 
         if num_days == -1:

@@ -10,7 +10,7 @@ class LanguageConfig:
             'google_voice': 'en-IN-Chirp3-HD-Enceladus',
             'google_language': 'en-IN',
             'stt_language': 'en-IN',
-            'speaking_rate': 0.95,
+            'speaking_rate': 1.0,
             'speech_hints': (
                 'yes, no, speaking, payment, pay, tomorrow, today, later, '
                 'manager, supervisor, help, extension, dispute, haan, ha, nahi, '

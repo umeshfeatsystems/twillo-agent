@@ -1,26 +1,16 @@
 """
 Multi-lingual Script Templates with Dynamic Context Handling
-Production-Ready Version 4.2 - End-to-End Scenarios
+Production-Ready Version 4.3 - Robust Number Handling via Library
 """
 from config import Config
 from datetime import datetime
-import re
+try:
+    from num2words import num2words
+except ImportError:
+    num2words = None
 
 class MultilingualScriptTemplates:
     
-    HINDI_NUMS_0_100 = {
-        0: 'शून्य', 1: 'एक', 2: 'दो', 3: 'तीन', 4: 'चार', 5: 'पाँच', 6: 'छह', 7: 'सात', 8: 'आठ', 9: 'नौ',
-        10: 'दस', 11: 'ग्यारह', 12: 'बारह', 13: 'तेरह', 14: 'चौदह', 15: 'पंद्रह', 16: 'सोलह', 17: 'सत्रह', 18: 'अठारह', 19: 'उन्नीस',
-        20: 'बीस', 21: 'इक्कीस', 22: 'बाईस', 23: 'तेइस', 24: 'चौबीस', 25: 'पच्चीस', 26: 'छब्बीस', 27: 'सत्ताइस', 28: 'अठ्ठाइस', 29: 'उनतीस',
-        30: 'तीस', 31: 'इकतीस', 32: 'बत्तीस', 33: 'तैंतीस', 34: 'चौंतीस', 35: 'पैंतीस', 36: 'छत्तीस', 37: 'सैंतीस', 38: 'अड़तीस', 39: 'उनतालीस',
-        40: 'चालीस', 41: 'इकतालीस', 42: 'बयालीस', 43: 'तैंतालिस', 44: 'चौवालिस', 45: 'पैंतालीस', 46: 'चियालीस', 47: 'सैंतालिस', 48: 'अड़तालीस', 49: 'उनचास',
-        50: 'पचास', 51: 'इक्यावन', 52: 'बावन', 53: 'तिरेपन', 54: 'चौबन', 55: 'पचपन', 56: 'छप्पन', 57: 'सत्तावन', 58: 'अट्ठावन', 59: 'उनसठ',
-        60: 'साठ', 61: 'इकसठ', 62: 'बासठ', 63: 'तिरसठ', 64: 'चौंसठ', 65: 'पैंसठ', 66: 'छियासठ', 67: 'सड़सठ', 68: 'अड़सठ', 69: 'उनहत्तर',
-        70: 'सत्तर', 71: 'इकहत्तर', 72: 'बहत्तर', 73: 'तिहत्तर', 74: 'चौहत्तर', 75: 'पचहत्तर', 76: 'छिहत्तर', 77: 'सत्तहत्तर', 78: 'अठहत्तर', 79: 'उनासी',
-        80: 'अस्सी', 81: 'इक्यासी', 82: 'बयासी', 83: 'तिरासी', 84: 'चौरासी', 85: 'पचासी', 86: 'छियासी', 87: 'सत्तासी', 88: 'अट्ठासी', 89: 'नवासी',
-        90: 'नब्बे', 91: 'इक्यानवे', 92: 'बानवे', 93: 'तिरानवे', 94: 'चौरानवे', 95: 'पचानवे', 96: 'छियानवे', 97: 'सत्तानवे', 98: 'अट्ठानवे', 99: 'निन्यानवे', 100: 'सौ'
-    }
-
     MONTH_NAMES = {
         'en': { '01': 'January', '02': 'February', '03': 'March', '04': 'April', '05': 'May', '06': 'June', '07': 'July', '08': 'August', '09': 'September', '10': 'October', '11': 'November', '12': 'December' },
         'hi': { '01': 'जनवरी', '02': 'फरवरी', '03': 'मार्च', '04': 'अप्रैल', '05': 'मई', '06': 'जून', '07': 'जुलाई', '08': 'अगस्त', '09': 'सितंबर', '10': 'अक्टूबर', '11': 'नवंबर', '12': 'दिसंबर' }
@@ -119,39 +109,23 @@ class MultilingualScriptTemplates:
     
     @staticmethod
     def _convert_number_to_hindi(n):
-        """Robust native conversion of numbers to Hindi text"""
-        try:
-            n = int(n)
-            if n in MultilingualScriptTemplates.HINDI_NUMS_0_100:
-                return MultilingualScriptTemplates.HINDI_NUMS_0_100[n]
-            
-            if n < 1000:
-                hundreds = n // 100
-                remainder = n % 100
-                text = f"{MultilingualScriptTemplates.HINDI_NUMS_0_100[hundreds]} सौ"
-                if remainder > 0:
-                    text += f" {MultilingualScriptTemplates.HINDI_NUMS_0_100[remainder]}"
-                return text
-            
-            if n < 100000:
-                thousands = n // 1000
-                remainder = n % 1000
-                text = f"{MultilingualScriptTemplates._convert_number_to_hindi(thousands)} हज़ार"
-                if remainder > 0:
-                    text += f" {MultilingualScriptTemplates._convert_number_to_hindi(remainder)}"
-                return text
-                
-            if n < 10000000:
-                lakhs = n // 100000
-                remainder = n % 100000
-                text = f"{MultilingualScriptTemplates._convert_number_to_hindi(lakhs)} लाख"
-                if remainder > 0:
-                    text += f" {MultilingualScriptTemplates._convert_number_to_hindi(remainder)}"
-                return text
-                
-            return str(n)
-        except:
-            return str(n)
+        """
+        Robust native conversion using num2words library.
+        Fallback to English if library fails or language not found.
+        """
+        if num2words:
+            try:
+                # Try specific Indian English/Hindi conversion
+                # 'en_IN' is standard for Indian numbering (Lakh/Crore)
+                # 'hi' is supported in newer versions of num2words or via plugins
+                return num2words(n, lang='hi') 
+            except Exception as e:
+                try:
+                    # Fallback to Indian English (gives 'one lakh', 'two crore')
+                    return num2words(n, lang='en_IN')
+                except:
+                    return str(n)
+        return str(n)
 
     @staticmethod
     def format_date_for_speech(date_str, language='en'):
@@ -170,6 +144,7 @@ class MultilingualScriptTemplates:
                 else: day_suffix = 'th'
                 return f"{day}{day_suffix} {month_name} {year}"
             else:
+                # Use robust converter for Day and Year
                 day_text = MultilingualScriptTemplates._convert_number_to_hindi(day)
                 year_text = MultilingualScriptTemplates._convert_number_to_hindi(year)
                 return f"{day_text} {month_name} {year_text}"
@@ -191,8 +166,10 @@ class MultilingualScriptTemplates:
             amount_val = int(float(amount))
             
             if language == 'hi':
+                # Dynamically convert to Hindi words (200 -> दो सौ, 15000 -> पंद्रह हज़ार)
                 return MultilingualScriptTemplates._convert_number_to_hindi(amount_val)
             
+            # For English, use Indian Comma formatting (1,50,000)
             amount_str = str(amount_val)
             if len(amount_str) <= 3: return amount_str
             formatted = ""
