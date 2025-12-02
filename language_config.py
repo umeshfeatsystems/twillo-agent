@@ -12,7 +12,7 @@ class LanguageConfig:
             'google_voice': 'en-IN-Chirp3-HD-Sadaltager',
             'google_language': 'en-IN',
             'stt_language': 'en-IN',
-            'speaking_rate': 0.95,
+            'speaking_rate': 1.05,
             'speech_hints': 'yes, no, payment, pay, manager, busy, later, wrong number'
         },
         'hi': {
@@ -24,7 +24,7 @@ class LanguageConfig:
             'google_voice': 'en-IN-Chirp3-HD-Sadaltager', 
             'google_language': 'en-IN', # Must match the voice's language code
             'stt_language': 'hi-IN',    # STT can still use Hindi model for better recognition
-            'speaking_rate': 0.90,
+            'speaking_rate': 1.05,
             'speech_hints': 'haan, nahi, paisa, payment, busy, baad mein, galat number'
         },
         'en-hi-hybrid': {
@@ -35,7 +35,7 @@ class LanguageConfig:
             'google_voice': 'en-IN-Chirp3-HD-Sadaltager', 
             'google_language': 'en-IN',
             'stt_language': 'en-IN', 
-            'speaking_rate': 0.90,
+            'speaking_rate': 1.0,
             'speech_hints': 'haan, yes, payment, pay, busy, later, call back, wrong number'
         }
     }

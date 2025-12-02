@@ -3,10 +3,18 @@ Script Helper - Focuses on Data Formatting and Compliance Scripts
 """
 from config import Config
 from datetime import datetime
+
+# Import num2words (Backup)
 try:
     from num2words import num2words
 except ImportError:
     num2words = None
+
+# Import indic-num2words (Primary for Hindi)
+try:
+    from num_to_words import num_to_word
+except ImportError:
+    num_to_word = None
 
 class MultilingualScriptTemplates:
     
@@ -15,10 +23,10 @@ class MultilingualScriptTemplates:
         'hi': { '01': 'जनवरी', '02': 'फरवरी', '03': 'मार्च', '04': 'अप्रैल', '05': 'मई', '06': 'जून', '07': 'जुलाई', '08': 'अगस्त', '09': 'सितंबर', '10': 'अक्टूबर', '11': 'नवंबर', '12': 'दिसंबर' }
     }
 
-    # Strict compliance scripts (Greeting & EMI Details) - Better to keep these hardcoded for legal safety
+    # Strict compliance scripts
     VERIFICATION_SCRIPTS = {
         'en': ["Hello. This is a call from {bank_name}. Am I speaking with {customer_name}?", "Hi. Calling from {bank_name}. Is this {customer_name}?"],
-        'hi': ["नमस्ते। मैं {bank_name} से बोल रही हूं। क्या मैं {customer_name} जी से बात कर रही हूं?", "नमस्ते। {bank_name} से कॉल है। क्या आप {customer_name} जी हैं?"]
+        'hi': ["नमस्ते। मैं {bank_name} से बोल रहा हूं। क्या मैं {customer_name} जी से बात कर रहा हूं?", "नमस्ते। {bank_name} से कॉल है। क्या आप {customer_name} जी हैं?"]
     }
 
     EMI_SCRIPTS = {
@@ -28,17 +36,30 @@ class MultilingualScriptTemplates:
     
     @staticmethod
     def _convert_number_to_hindi(n):
-        """Robust native conversion using num2words library."""
+        """Robust native conversion using indic-num2words (Primary) or num2words (Backup)."""
+        
+        # Priority 1: indic-num2words (Best for Hindi)
+        if num_to_word:
+            try:
+                return num_to_word(n, lang='hi')
+            except Exception as e:
+                print(f"indic-num2words failed for {n}: {e}")
+        
+        # Priority 2: num2words with 'hi' (Often buggy on Windows)
         if num2words:
             try:
-                # Force Hindi output
                 return num2words(n, lang='hi') 
             except Exception:
-                try:
-                    # Fallback to Indian English
-                    return num2words(n, lang='en_IN')
-                except:
-                    return str(n)
+                pass
+                
+        # Priority 3: num2words with 'en_IN' (Indian English fallback)
+        if num2words:
+            try:
+                return num2words(n, lang='en_IN')
+            except:
+                pass
+        
+        # Final Fallback: Just digits
         return str(n)
 
     @staticmethod
@@ -48,9 +69,13 @@ class MultilingualScriptTemplates:
             year = int(parts[0])
             month = parts[1]
             day = int(parts[2])
-            month_name = MultilingualScriptTemplates.MONTH_NAMES.get(language, MultilingualScriptTemplates.MONTH_NAMES['en']).get(month, month)
             
-            if language == 'hi':
+            # Treat 'en-hi-hybrid' as Hindi for pronunciation
+            lang_key = 'hi' if language in ['hi', 'en-hi-hybrid'] else 'en'
+            
+            month_name = MultilingualScriptTemplates.MONTH_NAMES.get(lang_key, MultilingualScriptTemplates.MONTH_NAMES['en']).get(month, month)
+            
+            if lang_key == 'hi':
                 day_text = MultilingualScriptTemplates._convert_number_to_hindi(day)
                 year_text = MultilingualScriptTemplates._convert_number_to_hindi(year)
                 return f"{day_text} {month_name} {year_text}"
@@ -68,34 +93,36 @@ class MultilingualScriptTemplates:
     def format_amount(amount, language='en'):
         """
         Returns the spoken string of the amount.
-        Example: 15000 -> "fifteen thousand" or "पंद्रह हज़ार"
         """
         try:
-            amount_val = int(float(str(amount).replace(',', '')))
+            amount_str = str(amount).replace(',', '').strip()
+            amount_val = int(float(amount_str))
             
-            if language == 'hi' or language == 'en-hi-hybrid':
+            # Use Hindi numbering for 'hi' AND 'en-hi-hybrid'
+            if language in ['hi', 'en-hi-hybrid']:
                 return MultilingualScriptTemplates._convert_number_to_hindi(amount_val)
             
-            # For pure English, use num2words in English
+            # For pure English
             if num2words:
-                return num2words(amount_val, lang='en_IN')
+                try:
+                    return num2words(amount_val, lang='en_IN')
+                except:
+                    return str(amount_val)
             
             return str(amount_val)
-        except Exception:
+        except Exception as e:
+            print(f"Error formatting amount {amount}: {e}")
             return str(amount)
             
     @staticmethod
     def get_verification_script(language, bank_name, customer_name, variation=0):
-        # Hybrid defaults to English for greeting usually, or simple Hindi
-        lang_key = 'hi' if language == 'hi' else 'en'
+        lang_key = 'hi' if language in ['hi', 'en-hi-hybrid'] else 'en'
         scripts = MultilingualScriptTemplates.VERIFICATION_SCRIPTS[lang_key]
         return scripts[variation % len(scripts)].format(bank_name=bank_name, customer_name=customer_name)
 
     @staticmethod
     def get_emi_script(language, customer_data):
-        # We prepare the variables here so the initial script is perfectly accurate
-        lang_key = 'hi' if language == 'hi' else 'en'
-        
+        lang_key = 'hi' if language in ['hi', 'en-hi-hybrid'] else 'en'
         amount = MultilingualScriptTemplates.format_amount(customer_data['bank_details']['pending_emi_amount'], language)
         due_date_spoken = MultilingualScriptTemplates.format_date_for_speech(customer_data['bank_details']['due_date'], language)
         loan_type = customer_data['bank_details']['loan_type']

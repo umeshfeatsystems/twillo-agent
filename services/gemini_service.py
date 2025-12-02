@@ -14,44 +14,37 @@ class GeminiService:
         amount = MultilingualScriptTemplates.format_amount(customer_data['bank_details']['pending_emi_amount'], language)
         due_date = customer_data['bank_details']['due_date']
         
-        # --- 1. DYNAMIC LANGUAGE & GENDER INSTRUCTIONS ---
+        # --- DYNAMIC LANGUAGE INSTRUCTION ---
         if language == 'en':
-            lang_instruction = "Speak in pure, professional Indian ENGLISH. Do NOT use Hindi words."
-            gender_rule = "Gender: Male. Tone: Professional."
-            examples = "" # English doesn't have this grammar issue
+            lang_instruction = """
+            LANGUAGE: ENGLISH ONLY.
+            - Speak pure, professional English.
+            - DO NOT use Hindi words.
+            """
+            negotiate_example = '"Sir, when can we expect the payment?"'
+            closing_example = '"Thank you for your time. Have a good day."'
             
         elif language == 'hi':
-            lang_instruction = "Speak in HINDI (clean Hinglish/Devanagari style)."
-            gender_rule = """
-            GENDER: MALE (Amit).
-            CRITICAL GRAMMAR RULES (DO NOT FAIL THIS):
-            1. Always use 'TA' ending for verbs (Karta, Hota, Sakta).
-            2. NEVER use 'TI' ending (Karti, Hoti, Sakti).
+            lang_instruction = """
+            LANGUAGE: HINDI ONLY (Male Grammar).
+            - Use clear Hindi.
+            - CRITICAL: Use MASCULINE grammar (Male).
+            - CORRECT: "Main karunga", "Main aaunga", "Samajh sakta hoon".
+            - WRONG: "Main karungi", "Aungi", "Sakti hoon".
             """
-            examples = """
-            CORRECT (MALE): "Main check kar raha hoon."
-            WRONG (FEMALE): "Main check kar rahi hoon."
-            CORRECT (MALE): "Main call karunga."
-            WRONG (FEMALE): "Main call karungi."
-            CORRECT (MALE): "Kya aap kar sakte hain?"
-            WRONG (FEMALE): "Kya aap kar sakti hain?"
-            """
+            negotiate_example = '"Sir, payment kab tak ho payega?"'
+            closing_example = '"Samay dene ke liye shukriya. Aapka din shubh ho."'
             
         else: # en-hi-hybrid
-            lang_instruction = "Speak in HINGLISH (Natural mix of Hindi & English)."
-            gender_rule = """
-            GENDER: MALE (Amit).
-            CRITICAL GRAMMAR RULES (DO NOT FAIL THIS):
-            1. Always use 'TA' ending for verbs (Karta, Hota, Sakta).
-            2. NEVER use 'TI' ending (Karti, Hoti, Sakti).
+            lang_instruction = """
+            LANGUAGE: HINGLISH (Male Grammar).
+            - Mix Hindi and English naturally.
+            - CRITICAL: Use MASCULINE grammar (Male).
+            - CORRECT: "Main check karta hoon", "Call karunga".
+            - WRONG: "Karti hoon", "Karungi".
             """
-            examples = """
-            CORRECT (MALE): "Main abhi check karta hoon."
-            WRONG (FEMALE): "Main abhi check karti hoon."
-            CORRECT (MALE): "Main samajh sakta hoon."
-            WRONG (FEMALE): "Main samajh sakti hoon."
-            CORRECT (MALE): "Payment delay ho raha hai."
-            """
+            negotiate_example = '"Sir, payment kab tak ho payega?"'
+            closing_example = '"Time dene ke liye shukriya. Have a good day."'
 
         return f"""
         ROLE: You are 'Amit', a SENIOR Recovery Agent for {bank_name}.
@@ -59,14 +52,10 @@ class GeminiService:
         IDENTITY:
         - Name: Amit.
         - Gender: MALE.
-        
-        {gender_rule}
-        
-        GRAMMAR EXAMPLES (FOLLOW THESE STRICTLY):
-        {examples}
+        - Tone: Firm, Professional, Authoritative.
         
         CRITICAL INSTRUCTIONS:
-        1. **LANGUAGE:** {lang_instruction}
+        1. {lang_instruction}
         2. **NUMBERS:** Write amounts in WORDS (e.g. {amount}) inside the sentence.
         
         DATA:
@@ -75,9 +64,9 @@ class GeminiService:
         - Date: {due_date}
         
         FLOW:
-        1. **Negotiate**: Get a date. "Sir, payment kab tak ho payega?"
+        1. **Negotiate**: Get a date. Example: {negotiate_example}
         2. **Solution**: Secure a commitment.
-        3. **Closing**: "Thank you for your time. Have a good day." (Translate if Hindi).
+        3. **Closing**: Example: {closing_example}
 
         OUTPUT JSON:
         {{
@@ -151,15 +140,22 @@ class GeminiService:
         
         if not customer_response.strip():
              return {"intent": "UNCLEAR", "polite_bot_response": "Hello?", "detected_language": language}
-             
+        
+        # --- DYNAMIC INSTRUCTION FOR VERIFICATION ---
+        if language == 'en':
+            verify_instruction = "Generate response in ENGLISH ONLY. Example: 'Thank you.'"
+        elif language == 'hi':
+            verify_instruction = "Generate response in HINDI (Male grammar). Example: 'Dhanyavad.'"
+        else:
+            verify_instruction = "Generate response in HINGLISH (Male grammar). Example: 'Shukriya.'"
+
         prompt = f"""
         Context: Agent Amit asked "Is this {customer_data['name']}?"
         User: "{customer_response}"
         
         Instructions:
         - Classify intent.
-        - Generate response in {language}.
-        - GENDER: MALE (Use 'Bol raha hoon').
+        - {verify_instruction}
         
         Output JSON: {{ "intent": "CONFIRMED_IDENTITY" | "DENIED_IDENTITY" | "UNCLEAR" | "ASK_WHO_ARE_YOU", "response_text": "Short response" }}
         """
@@ -172,7 +168,6 @@ class GeminiService:
             return {"intent": "UNCLEAR", "polite_bot_response": "Could you confirm your name?", "detected_language": language}
 
     def generate_verification_script(self, customer_data, bank_name, language='en'):
-        # Force a generic male greeting script here too if needed, but the current one is neutral
         return MultilingualScriptTemplates.get_verification_script(language, bank_name, customer_data['name'])
 
     def generate_emi_details_script(self, customer_data, language='en'):
