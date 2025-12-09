@@ -2,7 +2,7 @@ import numpy as np
 
 class AudioTranscoder:
     """
-    Handles conversion between Twilio (Mulaw 8k) and Gemini (PCM 16k/24k)
+    Handles conversion between Twilio (Mulaw 8k) and Gemini.
     """
 
     def _ulaw2lin(self, ulaw_data):
@@ -20,11 +20,7 @@ class AudioTranscoder:
     def _lin2ulaw(self, pcm_data):
         """Convert 16-bit PCM to 8-bit u-law"""
         pcm_data = np.frombuffer(pcm_data, dtype=np.int16)
-        
-        # [CRITICAL FIX] Cast to int32 BEFORE math operations.
-        # Without this, -32768 (min int16) stays negative after abs(),
-        # becomes 0 after clip(), and causes log2(0) -> Crash.
-        pcm_data = pcm_data.astype(np.int32)
+        pcm_data = pcm_data.astype(np.int32) # Prevent overflow
         
         sign = (pcm_data < 0)
         pcm_data = np.abs(pcm_data)
@@ -37,18 +33,18 @@ class AudioTranscoder:
         ulaw = (sign.astype(np.uint8) << 7) | (exponent.astype(np.uint8) << 4) | mantissa.astype(np.uint8)
         return (~ulaw).tobytes()
 
-    def process_twilio_to_gemini(self, mulaw_data: bytes) -> bytes:
-        """Twilio (8k Mulaw) -> Gemini (16k PCM)"""
+    def process_twilio_to_gemini_8k(self, mulaw_data: bytes) -> bytes:
+        """
+        Direct 8k -> 8k conversion. 
+        No upsampling. Best for latency and clarity on Gemini 2.0.
+        """
         if not mulaw_data: return b""
-        pcm_8k = self._ulaw2lin(mulaw_data)
-        # Use repeat for clean 2x upsampling (Fixes static/noise)
-        pcm_16k = np.repeat(pcm_8k, 2)
-        return pcm_16k.tobytes()
+        return self._ulaw2lin(mulaw_data).tobytes()
 
     def process_gemini_to_twilio(self, pcm_data: bytes) -> bytes:
         """Gemini (24k PCM) -> Twilio (8k Mulaw)"""
         if not pcm_data: return b""
         pcm_24k = np.frombuffer(pcm_data, dtype=np.int16)
-        # Simple decimation for 24k -> 8k
+        # Decimate 24k -> 8k (Take every 3rd sample)
         pcm_8k = pcm_24k[::3]
         return self._lin2ulaw(pcm_8k.tobytes())

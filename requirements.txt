@@ -1,8 +1,9 @@
 fastapi
 uvicorn[standard]
-google-genai
+google-genai>=0.4.0
 twilio
 numpy
 python-dotenv
 websockets
-audioop-lts
+python-multipart
+pymongo

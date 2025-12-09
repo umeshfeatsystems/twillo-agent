@@ -9,7 +9,8 @@ class Config:
     
     # --- GEMINI AI ---
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-    GEMINI_MODEL_ID = "gemini-2.5-flash-native-audio-preview-09-2025"
+    # [CRITICAL] Use the experimental flash model which supports low-latency audio
+    GEMINI_MODEL_ID = "gemini-2.0-flash-exp"
     
     # --- TWILIO ---
     TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
