@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Response, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Request, Response, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from twilio.twiml.voice_response import VoiceResponse
 from models.customer import Customer
@@ -9,7 +9,6 @@ from language_config import LanguageConfig
 from datetime import datetime
 import os
 import requests
-import traceback
 from pydantic import BaseModel, validator
 from typing import Optional
 
@@ -98,8 +97,6 @@ async def generate_greeting(customer_id: str, CallSid: str = Form(...)):
         language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
 
         voice_override = LanguageConfig.HYBRID_VOICE_NAME if language == 'en-hi-hybrid' else None
-        
-        # Generative Greeting? No, stick to script for Greeting for strict ID check
         script = gemini_service.generate_verification_script(customer, Config.BANK_NAME, language)
         
         Customer.get_collection().update_one(
@@ -116,7 +113,8 @@ async def generate_greeting(customer_id: str, CallSid: str = Form(...)):
         
         twiml = twilio_service.generate_initial_twiml(script, customer_id, language, voice_override=voice_override, stt_language=language)
         return Response(content=twiml, media_type="application/xml")
-    except Exception:
+    except Exception as e:
+        print(f"Error generating greeting: {e}")
         return Response(content=str(VoiceResponse().hangup()), media_type="application/xml")
 
 @router.post('/process-response')
@@ -130,22 +128,39 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
         current_state = call_record.get('call_state', 'CONVERSATION')
         conversation_history = call_record.get('conversation_history', [])
         
-        voice_override = LanguageConfig.HYBRID_VOICE_NAME if session_language == 'en-hi-hybrid' else None
+        voice_override = LanguageConfig.HYBRID_VOICE_NAME 
         
-        # --- VERIFICATION STATE ---
         if current_state == 'AWAITING_VERIFICATION':
-            # Use LLM to classify verification
+            # --- INTELLIGENT VERIFICATION ---
             bot_decision = gemini_service.analyze_verification(speech_result, customer, session_language)
             intent = bot_decision.get('intent')
             followup_text = bot_decision.get('polite_bot_response')
-            
+            detected_lang = bot_decision.get('detected_language')
+
+            # 1. IMPLICIT LANGUAGE SWITCH
+            if detected_lang and detected_lang != session_language and detected_lang != 'en-hi-hybrid':
+                 print(f"🔀 Implicitly switching language to: {detected_lang}")
+                 session_language = detected_lang
+                 Customer.get_collection().update_one(
+                    {'call_history.call_id': CallSid},
+                    {'$set': {'call_history.$.language': session_language}}
+                )
+
             if intent == 'CONFIRMED_IDENTITY':
                 next_state = 'CONVERSATION'
-                # Transition to EMI script
+                # 2. GENERATE EMI SCRIPT IN DETECTED LANGUAGE
                 emi_script = gemini_service.generate_emi_details_script(customer, session_language)
-                combined_text = f"{followup_text} {emi_script}"
-                twiml = twilio_service.generate_followup_twiml(combined_text, customer_id, session_language, voice_override=voice_override, stt_language=session_language)
-                followup_text = combined_text # For logging
+                
+                # Combine "Thank you" + "EMI Details" with a NATURAL PAUSE
+                # Using "... ... ..." to force Google TTS to take a breath
+                combined_text = f"{followup_text}... ... {emi_script}"
+                
+                twiml = twilio_service.generate_followup_twiml(
+                    combined_text, customer_id, session_language, 
+                    voice_override=voice_override, stt_language=session_language
+                )
+                followup_text = combined_text 
+
             elif intent == 'DENIED_IDENTITY':
                 next_state = 'HANGUP'
                 twiml = twilio_service.generate_goodbye_twiml(followup_text, session_language, voice_override=voice_override)
@@ -167,8 +182,8 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
             )
             return Response(content=twiml, media_type="application/xml")
 
-        # --- MAIN CONVERSATION (GENERATIVE) ---
         else:
+            # --- MAIN CONVERSATION ---
             bot_decision = gemini_service.get_bot_response(
                 current_state, speech_result, customer, 
                 conversation_history, session_language
@@ -177,9 +192,18 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
             intent = bot_decision.get('intent')
             followup_text = bot_decision.get('polite_bot_response')
             next_state = bot_decision.get('next_state')
-            should_transfer = bot_decision.get('should_transfer')
-            
-            # Log interaction
+            new_lang = bot_decision.get('switch_language_to')
+
+            # EXPLICIT SWITCH
+            if intent == 'SWITCH_LANGUAGE' and new_lang:
+                print(f"🔀 Explicitly switching language to: {new_lang}")
+                Customer.get_collection().update_one(
+                    {'call_history.call_id': CallSid},
+                    {'$set': {'call_history.$.language': new_lang}}
+                )
+                session_language = new_lang
+                next_state = 'CONVERSATION'
+
             Customer.get_collection().update_one(
                 {'call_history.call_id': CallSid},
                 {
@@ -199,7 +223,6 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
             elif next_state == 'PENDING_TRANSFER':
                 twiml = twilio_service.generate_transfer_twiml(followup_text, session_language, voice_override=voice_override)
             else:
-                # Continue Conversation
                 twiml = twilio_service.generate_followup_twiml(
                     followup_text, customer_id, session_language, 
                     voice_override=voice_override, stt_language=session_language
@@ -210,8 +233,7 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
     except Exception as e:
         print(f"Error: {e}")
         return Response(content=str(VoiceResponse().hangup()), media_type="application/xml")
-
-# --- UTILITY ROUTES (Restored) ---
+# Rest of the routes remain same
 @router.post('/handle-recording')
 async def handle_recording(CallSid: str = Form(...), RecordingUrl: str = Form(None)):
     try:
@@ -232,7 +254,6 @@ async def handle_recording(CallSid: str = Form(...), RecordingUrl: str = Form(No
         audio_filename = f"{CallSid}.wav"
         audio_filepath = os.path.join(customer_dir, audio_filename)
         
-        # Download in background or straightforward way
         auth = (Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         with requests.get(f"{RecordingUrl}.wav", auth=auth, stream=True) as r:
             r.raise_for_status()
