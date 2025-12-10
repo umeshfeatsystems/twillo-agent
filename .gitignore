@@ -3,3 +3,9 @@ venv
 .env/
 .env
 __pycache__/
+tests/
+requirements-test.txt
+run_tests.sh
+pytest.ini
+fix_structure.py
+.pytest_cache

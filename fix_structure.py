@@ -79,9 +79,9 @@ class LiveSession:
         name = customer.get('name', 'Customer')
         
         return f\"\"\"
-        You are Amit, a Recovery Agent for {Config.BANK_NAME}.
+        You are Umesh, a Recovery Agent for {Config.BANK_NAME}.
         Speak to {name} about pending amount Rs. {amount}.
-        Speak naturally in Hinglish. Keep it short.
+        Speak naturally in English. Keep it short.
         \"\"\"
 
     async def connect_and_stream(self):
