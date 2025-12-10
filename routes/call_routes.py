@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Request, Response, Form, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
-from twilio.twiml.voice_response import VoiceResponse
+from fastapi import APIRouter, Request, Response, Form, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 from models.customer import Customer
 from services.gemini_service import GeminiService
 from services.twilio_service import TwilioService
@@ -11,17 +11,20 @@ import os
 import requests
 from pydantic import BaseModel, validator
 from typing import Optional
+import json
+import base64
+import asyncio
 
-# Initialize Router
 router = APIRouter(prefix="/api/call", tags=["Call Logic"])
 
-# Services
 gemini_service = GeminiService()
 twilio_service = TwilioService()
 
-# Ensure directories exist
 if not os.path.exists('data'):
     os.makedirs('data')
+
+# Store active streaming sessions
+active_streams = {}
 
 class InitiateCallRequest(BaseModel):
     customer_id: str
@@ -64,7 +67,8 @@ async def initiate_call(request: InitiateCallRequest):
                 'call_state': 'CONNECTING',
                 'language': target_language,
                 'unclear_count': 0,
-                'context': {}
+                'context': {},
+                'partial_transcript': ''
             }
             Customer.update_call_history(customer_id, call_record)
             return {'success': True, 'call_sid': call_result['call_sid']}
@@ -76,18 +80,158 @@ async def initiate_call(request: InitiateCallRequest):
 @router.get('/tts-audio/{filename}')
 async def serve_tts_audio(filename: str):
     filepath = os.path.join('tts_cache', filename)
-    if not os.path.exists(filepath): return Response(status_code=404)
+    if not os.path.exists(filepath): 
+        return Response(status_code=404)
     return FileResponse(filepath, media_type='audio/mpeg')
 
 @router.post('/handle-answer')
 async def handle_answer(customer_id: str, CallSid: str = Form(...), AnsweredBy: str = Form('human')):
+    """Handle call answer - Use standard gather/say instead of streaming for now"""
     if AnsweredBy != 'human':
         return Response(content=twilio_service.generate_hangup_for_machine_twiml(), media_type="application/xml")
     
-    redirect_url = f"{Config.BASE_URL}/api/call/generate-greeting?customer_id={customer_id}"
-    response = VoiceResponse()
-    response.redirect(redirect_url, method='POST')
-    return Response(content=str(response), media_type="application/xml")
+    # For now, fall back to the standard flow (not streaming)
+    # This ensures calls work while we debug streaming
+    customer = Customer.find_by_id(customer_id)
+    call_record = next((c for c in customer.get('call_history', []) if c['call_id'] == CallSid), None)
+    language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
+
+    voice_override = LanguageConfig.HYBRID_VOICE_NAME if language == 'en-hi-hybrid' else None
+    script = gemini_service.generate_verification_script(customer, Config.BANK_NAME, language)
+    
+    Customer.get_collection().update_one(
+        {'call_history.call_id': CallSid},
+        {
+            '$push': {'call_history.$.conversation_history': {
+                'timestamp': datetime.utcnow().isoformat(),
+                'bot_response': script,
+                'intent': 'VERIFICATION_INITIATED'
+            }},
+            '$set': {'call_history.$.call_state': 'AWAITING_VERIFICATION'}
+        }
+    )
+    
+    twiml = twilio_service.generate_initial_twiml(script, customer_id, language, voice_override=voice_override, stt_language=language)
+    return Response(content=twiml, media_type="application/xml")
+
+# WEBSOCKET ENDPOINT - Properly configured for Twilio Media Streams
+@router.websocket('/media-stream')
+async def media_stream_endpoint(
+    websocket: WebSocket,
+    customer_id: str = Query(...),
+    call_sid: str = Query(...)
+):
+    """
+    Handle Twilio Media Streams WebSocket connection
+    Twilio will connect to: wss://yourdomain/api/call/media-stream?customer_id=X&call_sid=Y
+    """
+    
+    print(f"\n{'='*60}")
+    print(f"[WEBSOCKET] Incoming connection request")
+    print(f"[WEBSOCKET] Customer ID: {customer_id}")
+    print(f"[WEBSOCKET] Call SID: {call_sid}")
+    print(f"{'='*60}\n")
+    
+    # Accept the WebSocket connection
+    try:
+        await websocket.accept()
+        print(f"✓ [WEBSOCKET] Connection accepted for {call_sid}")
+    except Exception as e:
+        print(f"✗ [WEBSOCKET] Failed to accept connection: {e}")
+        return
+    
+    # Get customer data
+    customer = Customer.find_by_id(customer_id)
+    if not customer:
+        print(f"✗ [WEBSOCKET] Customer not found: {customer_id}")
+        await websocket.close(code=1008, reason="Customer not found")
+        return
+    
+    call_record = next((c for c in customer.get('call_history', []) if c['call_id'] == call_sid), None)
+    session_language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
+    
+    print(f"✓ [WEBSOCKET] Session initialized - Language: {session_language}")
+    
+    # Store session
+    active_streams[call_sid] = {
+        'websocket': websocket,
+        'customer_id': customer_id,
+        'language': session_language,
+        'state': 'AWAITING_VERIFICATION',
+        'buffer': b'',
+        'transcript_buffer': '',
+        'stream_sid': None,
+        'call_sid': call_sid
+    }
+    
+    try:
+        # Wait for Twilio to send 'start' event
+        print(f"[WEBSOCKET] Waiting for Twilio 'start' event...")
+        
+        async for message in websocket.iter_text():
+            try:
+                data = json.loads(message)
+                event = data.get('event')
+                
+                if event == 'start':
+                    stream_sid = data.get('start', {}).get('streamSid')
+                    active_streams[call_sid]['stream_sid'] = stream_sid
+                    print(f"✓ [WEBSOCKET] Stream started - StreamSid: {stream_sid}")
+                    
+                    # Send initial greeting
+                    greeting = gemini_service.generate_verification_script(
+                        customer, 
+                        Config.BANK_NAME, 
+                        session_language
+                    )
+                    print(f"[BOT] Sending greeting: {greeting[:50]}...")
+                    # For now, just log - TTS streaming needs more setup
+                    
+                elif event == 'media':
+                    # Receive audio from caller
+                    payload = data.get('media', {}).get('payload', '')
+                    if payload and active_streams.get(call_sid):
+                        audio_chunk = base64.b64decode(payload)
+                        active_streams[call_sid]['buffer'] += audio_chunk
+                        
+                        # Process every 1 second of audio (8000 bytes at 8kHz mulaw)
+                        if len(active_streams[call_sid]['buffer']) >= 8000:
+                            print(f"[AUDIO] Received {len(active_streams[call_sid]['buffer'])} bytes")
+                            # TODO: Process with STT
+                            active_streams[call_sid]['buffer'] = b''
+                
+                elif event == 'stop':
+                    print(f"[WEBSOCKET] Stream stopped by Twilio")
+                    break
+                
+                elif event == 'connected':
+                    print(f"✓ [WEBSOCKET] Twilio connected event received")
+                
+                else:
+                    print(f"[WEBSOCKET] Unknown event: {event}")
+                    
+            except json.JSONDecodeError as e:
+                print(f"✗ [WEBSOCKET] JSON decode error: {e}")
+                continue
+            except Exception as e:
+                print(f"✗ [WEBSOCKET] Error processing message: {e}")
+                continue
+    
+    except WebSocketDisconnect:
+        print(f"[WEBSOCKET] Client disconnected: {call_sid}")
+    except Exception as e:
+        print(f"✗ [WEBSOCKET] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Cleanup
+        if call_sid in active_streams:
+            del active_streams[call_sid]
+        print(f"[WEBSOCKET] Session cleaned up for {call_sid}")
+        try:
+            await websocket.close()
+        except:
+            pass
 
 @router.post('/generate-greeting')
 async def generate_greeting(customer_id: str, CallSid: str = Form(...)):
@@ -131,28 +275,29 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
         voice_override = LanguageConfig.HYBRID_VOICE_NAME 
         
         if current_state == 'AWAITING_VERIFICATION':
-            # --- INTELLIGENT VERIFICATION ---
             bot_decision = gemini_service.analyze_verification(speech_result, customer, session_language)
             intent = bot_decision.get('intent')
             followup_text = bot_decision.get('polite_bot_response')
             detected_lang = bot_decision.get('detected_language')
+            confidence = bot_decision.get('confidence', 0.0)
 
-            # 1. IMPLICIT LANGUAGE SWITCH
-            if detected_lang and detected_lang != session_language and detected_lang != 'en-hi-hybrid':
-                 print(f"🔀 Implicitly switching language to: {detected_lang}")
-                 session_language = detected_lang
-                 Customer.get_collection().update_one(
+            # ONLY switch if confidence is high (>0.7) and languages are truly different
+            if (detected_lang and 
+                detected_lang != session_language and 
+                detected_lang != 'en-hi-hybrid' and
+                confidence > 0.7):
+                print(f"🔀 High confidence language switch: {session_language} → {detected_lang} (confidence: {confidence:.2f})")
+                session_language = detected_lang
+                Customer.get_collection().update_one(
                     {'call_history.call_id': CallSid},
                     {'$set': {'call_history.$.language': session_language}}
                 )
+            else:
+                print(f"🔒 Language maintained: {session_language} (detected: {detected_lang}, confidence: {confidence:.2f})")
 
             if intent == 'CONFIRMED_IDENTITY':
                 next_state = 'CONVERSATION'
-                # 2. GENERATE EMI SCRIPT IN DETECTED LANGUAGE
                 emi_script = gemini_service.generate_emi_details_script(customer, session_language)
-                
-                # Combine "Thank you" + "EMI Details" with a NATURAL PAUSE
-                # Using "... ... ..." to force Google TTS to take a breath
                 combined_text = f"{followup_text}... ... {emi_script}"
                 
                 twiml = twilio_service.generate_followup_twiml(
@@ -183,7 +328,6 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
             return Response(content=twiml, media_type="application/xml")
 
         else:
-            # --- MAIN CONVERSATION ---
             bot_decision = gemini_service.get_bot_response(
                 current_state, speech_result, customer, 
                 conversation_history, session_language
@@ -194,7 +338,6 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
             next_state = bot_decision.get('next_state')
             new_lang = bot_decision.get('switch_language_to')
 
-            # EXPLICIT SWITCH
             if intent == 'SWITCH_LANGUAGE' and new_lang:
                 print(f"🔀 Explicitly switching language to: {new_lang}")
                 Customer.get_collection().update_one(
@@ -233,7 +376,7 @@ async def process_response(customer_id: str, CallSid: str = Form(...), SpeechRes
     except Exception as e:
         print(f"Error: {e}")
         return Response(content=str(VoiceResponse().hangup()), media_type="application/xml")
-# Rest of the routes remain same
+
 @router.post('/handle-recording')
 async def handle_recording(CallSid: str = Form(...), RecordingUrl: str = Form(None)):
     try:
