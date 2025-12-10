@@ -10,7 +10,7 @@ def create_session(user_id, resume_text, job, role):
         "status": "waiting",
         "created_at": datetime.utcnow()
     }
-    # Use replace_one with upsert to create or update
+    # Use replace_one with upsert to create or updates
     sessions_collection.replace_one({"_id": user_id}, data, upsert=True)
 
 def get_session_by_id(user_id):
