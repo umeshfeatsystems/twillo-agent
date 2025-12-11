@@ -41,8 +41,15 @@ class MultilingualScriptTemplates:
     }
 
     EMI_SCRIPTS = {
-        'en': { 'current': "Regarding your {loan_type}. There is a pending installment of rupees {amount}, due on {due_date_spoken}. How would you like to make this payment?", 'overdue': "Regarding your {loan_type}. A payment of rupees {amount} is overdue since {due_date_spoken}. We need to clear this. When can you pay?" },
-        'hi': { 'current': "आपके {loan_type} के बारे में। {amount} रुपये की किश्त {due_date_spoken} को देनी है। आप यह पेमेंट कैसे करेंगे?", 'overdue': "आपके {loan_type} के लिए। {amount} रुपये {due_date_spoken} से बाकी हैं। इसे क्लियर करना ज़रूरी है। आप कब तक जमा करेंगे?" }
+        'en': { 
+            'current': "Regarding your {loan_type}. There is a pending installment of rupees {amount}, due on {due_date_spoken}. How would you like to make this payment?", 
+            'overdue': "Regarding your {loan_type}. A payment of rupees {amount} is overdue since {due_date_spoken}. We need to clear this. When can you pay?" 
+        },
+        'hi': { 
+            # STRICT HINDI: Replaced 'payment' with 'bhugtan' and 'clear' with 'jama/chukana'
+            'current': "आपके {loan_type} के बारे में। {amount} रुपये की किश्त {due_date_spoken} को देनी है। आप यह भुगतान (Payment) कैसे करेंगे?", 
+            'overdue': "आपके {loan_type} के लिए। {amount} रुपये {due_date_spoken} से बाकी हैं। इसे जमा करना ज़रूरी है। आप कब तक चुकायेंगे?" 
+        }
     }
     
     @staticmethod

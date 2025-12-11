@@ -3,6 +3,7 @@ from twilio.twiml.voice_response import VoiceResponse, Gather, Dial
 from config import Config
 from language_config import LanguageConfig
 from services.google_tts_service import google_tts_service
+from utils.audio_cache import AudioCache
 import uuid
 import os
 import base64
@@ -15,10 +16,9 @@ class TwilioService:
         if not google_tts_service.client:
             raise Exception("Google Cloud TTS is required but not available")
         
-        if not os.path.exists('tts_cache'):
-            os.makedirs('tts_cache')
+        # Note: 'tts_cache' directory creation removed as we use in-memory caching
         
-        print("✓ TwilioService initialized with Google Cloud TTS only")
+        print("✓ TwilioService initialized (In-Memory Caching Enabled)")
     
     def initiate_call(self, to_number, customer_id):
         try:
@@ -38,8 +38,8 @@ class TwilioService:
                 status_callback=status_callback_url,
                 status_callback_event=['initiated', 'ringing', 'answered', 'completed'],
                 status_callback_method='POST',
-                machine_detection='Disable',
-                record=True,
+                machine_detection='Disable', # Keep disabled for lower latency on connect
+                record=Config.ENABLE_RECORDING,
                 recording_status_callback=recording_status_callback_url,
                 recording_status_callback_event=['completed'],
                 recording_status_callback_method='POST',
@@ -71,23 +71,26 @@ class TwilioService:
             text += '.'
         return text
     
-    def _save_audio_file(self, audio_base64, filename):
+    def _store_audio_memory(self, audio_base64, filename):
+        """
+        OPTIMIZATION: Store audio in RAM instead of Disk.
+        This reduces I/O latency significantly.
+        """
         try:
+            # Decode base64 to raw bytes once here, so we don't do it on every read
             audio_bytes = base64.b64decode(audio_base64)
-            filepath = os.path.join('tts_cache', filename)
             
-            with open(filepath, 'wb') as f:
-                f.write(audio_bytes)
+            # Store in AudioCache
+            AudioCache.set(filename, audio_bytes)
             
+            # Return the URL that will fetch from memory
             audio_url = f"{Config.BASE_URL}/api/call/tts-audio/{filename}"
-            print(f"✓ Audio saved: {filename}")
             return audio_url
         except Exception as e:
-            print(f"✗ Error saving audio file: {e}")
-            raise Exception(f"Failed to save audio: {e}")
+            print(f"✗ Error caching audio: {e}")
+            raise Exception(f"Failed to cache audio: {e}")
     
     def _create_say_element(self, response, text, language='en', voice_override=None):
-        # CRITICAL FIX: Prevent empty text from crashing Google TTS
         if not text or not text.strip():
             print("⚠ Warning: Empty text passed to TTS. Playing silence/fallback.")
             response.pause(length=1)
@@ -95,25 +98,25 @@ class TwilioService:
 
         normalized_text = self._normalize_script_for_tts(text)
         try:
-            # Pass voice_override to Google TTS
+            # Generate Audio (Time taken: TTS Generation)
             audio_base64 = google_tts_service.synthesize_speech(normalized_text, language, voice_override)
+            
             filename = f"{uuid.uuid4().hex}.mp3"
-            audio_url = self._save_audio_file(audio_base64, filename)
-            print(f"[GOOGLE TTS] Playing: {audio_url}")
+            
+            # Cache Audio (Time taken: ~0.001s vs ~0.1s disk IO)
+            audio_url = self._store_audio_memory(audio_base64, filename)
+            
+            print(f"[TTS] Served via Memory: {audio_url}")
             response.play(audio_url)
         except Exception as e:
             print(f"✗ CRITICAL: Google TTS failed: {e}")
-            # Fallback: Use Twilio's basic TTS or silence if Google fails
             response.say("I am having trouble connecting. One moment.")
     
     def generate_initial_twiml(self, script_text, customer_id, language='en', voice_override=None, stt_language=None):
-        """Generate initial TwiML - Play audio THEN listen"""
         response = VoiceResponse()
         
-        # 1. Play the bot's message (TTS uses 'language')
         self._create_say_element(response, script_text, language, voice_override)
         
-        # 2. Listen (STT uses 'stt_language' if provided, else defaults to 'language')
         target_stt_lang = stt_language if stt_language else language
         stt_config = LanguageConfig.get_stt_config(target_stt_lang)
         
@@ -130,24 +133,16 @@ class TwilioService:
         )
         response.append(gather)
         
-        # If no input, redirect to process-response with empty speech to trigger "Hello?" logic
         response.redirect(f'{Config.BASE_URL}/api/call/process-response?customer_id={customer_id}', method='POST')
         
-        print(f"[TWILIO] Generated initial TwiML. TTS: {language} | STT: {target_stt_lang}")
         return str(response)
     
     def generate_followup_twiml(self, followup_text, customer_id, language='en', voice_override=None, stt_language=None):
-        """Generate follow-up TwiML"""
         return self.generate_initial_twiml(followup_text, customer_id, language, voice_override, stt_language)
     
     def generate_goodbye_twiml(self, text, language='en', voice_override=None):
         response = VoiceResponse()
         self._create_say_element(response, text, language, voice_override)
-        response.hangup()
-        return str(response)
-    
-    def generate_hangup_for_machine_twiml(self):
-        response = VoiceResponse()
         response.hangup()
         return str(response)
     
@@ -168,9 +163,8 @@ class TwilioService:
             response.append(dial)
         
         return str(response)
-    
-    def generate_say_and_redirect_twiml(self, text, redirect_url, language='en', voice_override=None):
+
+    def generate_hangup_for_machine_twiml(self):
         response = VoiceResponse()
-        self._create_say_element(response, text, language, voice_override)
-        response.redirect(redirect_url, method='POST')
+        response.hangup()
         return str(response)

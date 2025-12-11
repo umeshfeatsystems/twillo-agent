@@ -22,8 +22,9 @@ class GeminiService:
         
         if language == 'en':
             lang_instruction = """
-            LANGUAGE: ENGLISH ONLY.
-            - Speak professionally but naturally.
+            LANGUAGE: STRICTLY ENGLISH ONLY.
+            - DO NOT use any Hindi words, greetings, or honorifics (No "Namaste", No "Ji", No "Haan").
+            - Speak professionally but naturally in standard English.
             - Use contractions (e.g., "I'm calling" instead of "I am calling").
             - TONE: Polite, firm, but empathetic.
             - Keep responses under 3 sentences for faster delivery.
@@ -32,15 +33,18 @@ class GeminiService:
             
         elif language == 'hi':
             lang_instruction = """
-            LANGUAGE: HINDI (Conversational).
-            - Use Devanagari script for Hindi text (नमस्ते, धन्यवाद).
+            LANGUAGE: STRICTLY HINDI ONLY (शुद्ध हिंदी/खड़ी बोली).
+            - DO NOT use English sentences or phrases.
+            - Use Devanagari script ONLY (नमस्ते, धन्यवाद).
+            - EXCEPTION: You may use common banking terms like 'Loan', 'EMI', or 'Bank' in Hindi script (e.g., लोन, ईएमआई, बैंक) ONLY if strictly necessary. Prefer Hindi words like 'किश्त' (Kisht) for installment.
+            - DO NOT switch to English even if the user uses English words. Maintain Hindi.
             - TONE: Natural, not robotic.
             - Keep responses under 3 sentences.
             - PRONUNCIATION FIXES (CRITICAL):
               - Write 'मै' (Mai) instead of 'मैं' (Main).
               - Write 'हूं' (Hu) instead of 'हूँ' (Hoon).
             """
-            closing_example = '"Samay dene ke liye shukriya. Aapka din shubh ho."'
+            closing_example = '"Samay dene ke liye dhanyavad. Aapka din shubh ho."'
             
         else:
             lang_instruction = """
@@ -275,12 +279,13 @@ class GeminiService:
         2. **CRITICAL**: Keep response SHORT (1-2 words max). DO NOT repeat customer name or long phrases.
         
         RESPONSE RULES (EXACT TEMPLATES):
-        - Confirmed + English: "Thank you."
-        - Confirmed + Hindi: "धन्यवाद।"
+        - Confirmed + English: "Thank you." (STRICTLY English)
+        - Confirmed + Hindi: "धन्यवाद।" (STRICTLY Hindi)
         - Confirmed + Hinglish: "Thank you."
         - Denied + English: "Sorry, wrong number."
         - Denied + Hindi: "क्षमा करें, गलत नंबर।"
-        - Unclear: "Could you confirm your name?"
+        - Unclear + English: "Could you confirm your name?"
+        - Unclear + Hindi: "क्या आप अपना नाम बता सकते हैं?"
         
         **DO NOT auto-detect language for switching.** Use the current session language: {language}
         
