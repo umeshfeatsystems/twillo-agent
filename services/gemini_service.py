@@ -26,7 +26,11 @@ class GeminiService:
         try:
             response = self.model.generate_content(
                 full_prompt, 
-                generation_config={"response_mime_type": "application/json"}
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": 250, # <--- ADD THIS (Forces brevity)
+                    "temperature": 0.3        # Lower temp = Faster, deterministic decisions
+                }
             )
             return json.loads(response.text)
         except Exception as e:

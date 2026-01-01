@@ -27,7 +27,7 @@ class TwilioService:
                 method='POST',
                 status_callback=f"{Config.BASE_URL}/api/call/status",
                 status_callback_event=['initiated', 'ringing', 'answered', 'completed'],
-                machine_detection='Enable', 
+                machine_detection='Disable', 
                 timeout=30
             )
             return {'success': True, 'call_sid': call.sid}

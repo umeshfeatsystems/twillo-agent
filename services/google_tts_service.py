@@ -7,59 +7,59 @@ from language_config import LanguageConfig
 class GoogleTTSService:
     def __init__(self):
         self.client = None
+        # 1. Initialize Memory Cache
+        self._audio_cache = {} 
+        
         if Config.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
             try:
-                # Set environment variable for Google Cloud SDK
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = Config.GOOGLE_APPLICATION_CREDENTIALS
                 self.client = texttospeech.TextToSpeechClient()
-                print("✓ Google Cloud TTS client initialized successfully")
+                print("✓ Google Cloud TTS client initialized")
             except Exception as e:
-                print(f"✗ CRITICAL: Failed to initialize Google TTS: {e}")
-                print(f"✗ Check if credentials file exists at: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
-        else:
-            print(f"✗ CRITICAL: Google Cloud credentials not found at {Config.GOOGLE_APPLICATION_CREDENTIALS}")
-    
+                print(f"✗ Failed: {e}")
+
     def synthesize_to_mulaw(self, text, language='en-IN', voice_override=None):
         """
-        Synthesizes text to 8000Hz MULAW audio (Required for Twilio Media Streams).
-        Returns: Raw Bytes (not base64)
+        Synthesizes text to 8000Hz MULAW audio with Caching.
         """
-        if not self.client: 
-            print("Error: TTS Client not active")
-            return None
+        if not self.client or not text: return None
+
+        # 2. Check Cache First (Instant Return)
+        # Create a unique key based on text and voice
+        tts_config = LanguageConfig.get_tts_config(language)
+        voice_name = voice_override or tts_config['voice_name']
+        cache_key = f"{text}|{voice_name}|{language}"
+
+        if cache_key in self._audio_cache:
+            print(f"[CACHE] Served TTS from RAM: '{text[:20]}...'")
+            return self._audio_cache[cache_key]
 
         try:
-            # 1. Config
-            tts_config = LanguageConfig.get_tts_config(language)
-            voice_name = voice_override or tts_config['voice_name']
-            
-            # 2. Input
+            # 3. Generate if not in cache
             synthesis_input = texttospeech.SynthesisInput(text=text)
-
-            # 3. Voice Selection
+            
             voice = texttospeech.VoiceSelectionParams(
                 language_code=tts_config['language_code'],
                 name=voice_name
             )
 
-            # 4. Audio Config (CRITICAL FOR STREAMING)
-            # Twilio Media Streams strictly requires Encoding=MULAW, SampleRate=8000Hz
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MULAW,
                 sample_rate_hertz=8000
             )
 
-            # 5. Call API
             response = self.client.synthesize_speech(
                 input=synthesis_input,
                 voice=voice,
                 audio_config=audio_config
             )
             
+            # 4. Save to Cache
+            self._audio_cache[cache_key] = response.audio_content
             return response.audio_content
             
         except Exception as e:
-            print(f"TTS Mulaw Error: {e}")
+            print(f"TTS Error: {e}")
             return None
 
     def synthesize_speech(self, text, language='en', voice_override=None):

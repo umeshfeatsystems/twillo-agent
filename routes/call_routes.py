@@ -20,7 +20,7 @@ class CallRequest(BaseModel):
 
 @router.post('/initiate')
 async def initiate_call(request: CallRequest):
-    logger.info(f"🚀 [INITIATE] Request for {request.phone_number}")
+    logger.info(f" [INITIATE] Request for {request.phone_number}")
     try:
         formatted_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             name=request.call_details.get('name', 'Customer'),
@@ -59,7 +59,7 @@ async def handle_answer(session_id: str):
     Called when the user picks up.
     Returns TwiML to connect to the WebSocket stream.
     """
-    logger.info(f"🤙 [HANDLE-ANSWER] Session: {session_id}")
+    logger.info(f" [HANDLE-ANSWER] Session: {session_id}")
     
     session = CallSession.find_by_session_id(session_id)
     if not session: 
@@ -71,7 +71,7 @@ async def handle_answer(session_id: str):
 
 @router.post('/status')
 async def call_status(CallSid: str = Form(...), CallStatus: str = Form(...)):
-    logger.info(f"📶 [STATUS] SID: {CallSid} | Status: {CallStatus}")
+    logger.info(f" [STATUS] SID: {CallSid} | Status: {CallStatus}")
     return Response(status_code=200)
 
 # Keep the TTS audio route for legacy/fallback support if needed
