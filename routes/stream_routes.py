@@ -8,12 +8,10 @@ import base64
 import logging
 import queue
 import threading
-import time  # <--- Added for latency calculation
+import time
 from google.cloud import speech
 from config import Config
 
-# --- 1. CONFIGURE LOGGER WITH TIMESTAMPS ---
-# This ensures every log line has a precise time (e.g., 14:30:05.123)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s.%(msecs)03d | %(message)s',
@@ -23,7 +21,6 @@ logger = logging.getLogger("StreamRoutes")
 
 router = APIRouter(prefix="/api/call", tags=["Streaming"])
 
-# --- AUDIO CONFIGURATION ---
 STT_CONFIG = speech.RecognitionConfig(
     encoding=speech.RecognitionConfig.AudioEncoding.MULAW,
     sample_rate_hertz=8000,
@@ -40,7 +37,7 @@ STREAMING_CONFIG = speech.StreamingRecognitionConfig(
 @router.websocket("/stream")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    logger.info(" [WS] Connected")
+    logger.info("🔌 [WS] Connected")
     
     audio_queue = queue.Queue()
     stream_sid = None
@@ -48,39 +45,36 @@ async def websocket_endpoint(websocket: WebSocket):
     stop_event = threading.Event()
     loop = asyncio.get_event_loop() 
 
-    # --- HELPER: SEND AUDIO & MARK ---
-    async def send_audio_packet(text, should_hangup=False):
+    # --- HELPER: SEND AUDIO ---
+    async def send_audio_packet(text):
         if not text: return
         try:
             # Generate MULAW audio
             audio_bytes = google_tts_service.synthesize_to_mulaw(text)
             if not audio_bytes: return
 
-            # Encode
             payload = base64.b64encode(audio_bytes).decode('utf-8')
             
-            # Send Media
             await websocket.send_json({
                 "event": "media",
                 "streamSid": stream_sid,
                 "media": {"payload": payload}
             })
-
-            # Handle Hangup Mark
-            if should_hangup:
-                logger.info(" [WS] Sending 'end_call' mark...")
-                await websocket.send_json({
-                    "event": "mark",
-                    "streamSid": stream_sid,
-                    "mark": {"name": "end_call"}
-                })
-                
         except Exception as e:
             logger.error(f"Error sending audio: {e}")
 
-    # --- SYNC THREAD: GOOGLE STT & AI ---
+    # --- HELPER: SEND HANGUP MARK ---
+    async def send_hangup_mark():
+        logger.info("🚩 [WS] Sending 'end_call' mark...")
+        await websocket.send_json({
+            "event": "mark",
+            "streamSid": stream_sid,
+            "mark": {"name": "end_call"}
+        })
+
+    # --- SYNC THREAD: GOOGLE STT & AI STREAMING ---
     def stt_processing_thread():
-        logger.info(" [THREAD] STT Processor Started")
+        logger.info("🧵 [THREAD] STT Processor Started")
         client = speech.SpeechClient()
 
         def request_generator():
@@ -103,49 +97,74 @@ async def websocket_endpoint(websocket: WebSocket):
                 result = response.results[0]
                 if not result.is_final: continue
 
-                # A. GET USER TEXT & START TIMER
                 user_text = result.alternatives[0].transcript.strip()
                 if not user_text: continue
                 
-                # <--- START TIMER
-                start_time = time.time() 
-                logger.info(f"[USER] {user_text}")
+                logger.info(f"🗣️ [USER] {user_text}")
+                start_time = time.time() # Latency Timer
 
-                # Get Session & AI Response
+                # 1. Setup Context
                 session = CallSession.find_by_session_id(session_id) if session_id else None
                 system_prompt = session.get('system_prompt', "You are a helpful assistant.") if session else "You are a helpful assistant."
                 history = session.get('conversation_history', []) if session else []
 
-                ai_decision = gemini_service.get_generic_response(
+                # 2. Call Streaming API
+                response_generator = gemini_service.get_streaming_response(
                     system_prompt=system_prompt,
                     conversation_history=history,
                     user_input=user_text
                 )
-                
-                bot_text = ai_decision.get('response_text', "I didn't catch that.")
-                should_hangup = ai_decision.get('should_hangup', False)
 
-                # <--- STOP TIMER & CALCULATE LATENCY
-                latency = time.time() - start_time
-                logger.info(f" [BOT] {bot_text} | Latency: {latency:.3f}s | Hangup: {should_hangup}")
+                # 3. Stream & Sentence Buffer Loop
+                current_sentence = ""
+                full_response_text = ""
+                first_chunk_sent = False
 
+                for chunk in response_generator:
+                    current_sentence += chunk
+                    full_response_text += chunk
+                    
+                    # Check for sentence endings to send audio IMMEDIATELY
+                    if any(punct in current_sentence for punct in [". ", "? ", "! "]):
+                        clean_text = current_sentence.strip()
+                        if clean_text:
+                            # Send Audio for this sentence
+                            asyncio.run_coroutine_threadsafe(
+                                send_audio_packet(clean_text), loop
+                            )
+                            
+                            # Log Latency only for the FIRST sentence
+                            if not first_chunk_sent:
+                                latency = time.time() - start_time
+                                logger.info(f"⚡ [TTS] First Sentence Sent. Latency: {latency:.3f}s")
+                                first_chunk_sent = True
+                                
+                        current_sentence = "" # Reset buffer
+
+                # 4. Send any remaining text in buffer
+                if current_sentence.strip():
+                    asyncio.run_coroutine_threadsafe(
+                        send_audio_packet(current_sentence.strip()), loop
+                    )
+
+                logger.info(f"🤖 [BOT FULL] {full_response_text}")
+
+                # 5. Update History
                 if session_id:
                     CallSession.append_history(session_id, {"role": "user", "content": user_text})
-                    CallSession.append_history(session_id, {"role": "assistant", "content": bot_text})
+                    CallSession.append_history(session_id, {"role": "assistant", "content": full_response_text})
 
-                # Send Back to Main Loop
-                if stream_sid:
-                    asyncio.run_coroutine_threadsafe(
-                        send_audio_packet(bot_text, should_hangup), 
-                        loop
-                    )
-                    
+                # 6. Heuristic Hangup Logic (Since we lost JSON)
+                # If bot says "Goodbye" or "Have a great day", we hang up.
+                lower_text = full_response_text.lower()
+                if "goodbye" in lower_text or "have a great day" in lower_text or "thank you" in lower_text:
+                    asyncio.run_coroutine_threadsafe(send_hangup_mark(), loop)
+
         except Exception as e:
             logger.error(f"❌ [THREAD] STT Error: {e}")
         finally:
-            logger.info(" [THREAD] STT Processor Ended")
+            logger.info("🧵 [THREAD] STT Processor Ended")
 
-    # --- MAIN ASYNC LOOP ---
     stt_thread = threading.Thread(target=stt_processing_thread)
     stt_thread.start()
 
@@ -157,7 +176,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if data['event'] == 'start':
                 stream_sid = data['start']['streamSid']
                 session_id = data['start']['customParameters'].get('session_id')
-                logger.info(f" [WS] Stream Started. SID: {stream_sid}")
+                logger.info(f"🚀 [WS] Stream Started. SID: {stream_sid}")
                 
                 if session_id:
                     session = CallSession.find_by_session_id(session_id)
@@ -171,7 +190,7 @@ async def websocket_endpoint(websocket: WebSocket):
             
             elif data['event'] == 'mark':
                 if data['mark']['name'] == 'end_call':
-                    logger.info(" [WS] 'end_call' mark received. Closing connection.")
+                    logger.info("👋 [WS] Hangup mark received. Closing.")
                     await websocket.close()
                     break
 
@@ -181,7 +200,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
                 
     except WebSocketDisconnect:
-        logger.info(" [WS] Disconnected")
+        logger.info("🔌 [WS] Disconnected")
         stop_event.set()
     except Exception as e:
         logger.error(f"❌ [WS] Critical Error: {e}")
