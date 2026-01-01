@@ -12,46 +12,71 @@ class GoogleTTSService:
                 # Set environment variable for Google Cloud SDK
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = Config.GOOGLE_APPLICATION_CREDENTIALS
                 self.client = texttospeech.TextToSpeechClient()
-                print("Google Cloud TTS client initialized successfully")
+                print("✓ Google Cloud TTS client initialized successfully")
             except Exception as e:
                 print(f"✗ CRITICAL: Failed to initialize Google TTS: {e}")
                 print(f"✗ Check if credentials file exists at: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
-                raise Exception("Google Cloud TTS is required but failed to initialize")
         else:
-            error_msg = f"✗ CRITICAL: Google Cloud credentials not found at {Config.GOOGLE_APPLICATION_CREDENTIALS}"
-            print(error_msg)
-            raise Exception(error_msg)
+            print(f"✗ CRITICAL: Google Cloud credentials not found at {Config.GOOGLE_APPLICATION_CREDENTIALS}")
     
+    def synthesize_to_mulaw(self, text, language='en-IN', voice_override=None):
+        """
+        Synthesizes text to 8000Hz MULAW audio (Required for Twilio Media Streams).
+        Returns: Raw Bytes (not base64)
+        """
+        if not self.client: 
+            print("Error: TTS Client not active")
+            return None
+
+        try:
+            # 1. Config
+            tts_config = LanguageConfig.get_tts_config(language)
+            voice_name = voice_override or tts_config['voice_name']
+            
+            # 2. Input
+            synthesis_input = texttospeech.SynthesisInput(text=text)
+
+            # 3. Voice Selection
+            voice = texttospeech.VoiceSelectionParams(
+                language_code=tts_config['language_code'],
+                name=voice_name
+            )
+
+            # 4. Audio Config (CRITICAL FOR STREAMING)
+            # Twilio Media Streams strictly requires Encoding=MULAW, SampleRate=8000Hz
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.MULAW,
+                sample_rate_hertz=8000
+            )
+
+            # 5. Call API
+            response = self.client.synthesize_speech(
+                input=synthesis_input,
+                voice=voice,
+                audio_config=audio_config
+            )
+            
+            return response.audio_content
+            
+        except Exception as e:
+            print(f"TTS Mulaw Error: {e}")
+            return None
+
     def synthesize_speech(self, text, language='en', voice_override=None):
         """
-        Synthesize speech using Google Cloud TTS.
+        Legacy MP3 synthesis for HTTP/Fallback routes.
         """
-        if not self.client:
-            raise Exception("Google TTS client not initialized")
+        if not self.client: return None
         
         try:
-            # 1. Get default config for the content language
             tts_config = LanguageConfig.get_tts_config(language)
-            
             synthesis_input = texttospeech.SynthesisInput(text=text)
             
-            # 2. Determine Voice Name
-            if voice_override:
-                voice_name = voice_override
-            else:
-                voice_name = tts_config['voice_name']
+            voice_name = voice_override or tts_config['voice_name']
+            if 'en-IN' in voice_name: lang_code = 'en-IN'
+            elif 'hi-IN' in voice_name: lang_code = 'hi-IN'
+            else: lang_code = tts_config['language_code']
 
-            # 3. AUTO-DETECT Language Code from Voice Name
-            # This is the fail-safe. If we are using an 'en-IN' voice (Sadaltager),
-            # we MUST tell Google the request is 'en-IN', even if the text is Hindi.
-            if 'en-IN' in voice_name:
-                lang_code = 'en-IN'
-            elif 'hi-IN' in voice_name:
-                lang_code = 'hi-IN'
-            else:
-                lang_code = tts_config['language_code']
-
-            # 4. Build Parameters
             voice = texttospeech.VoiceSelectionParams(
                 language_code=lang_code,
                 name=voice_name
@@ -60,7 +85,6 @@ class GoogleTTSService:
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
                 speaking_rate=tts_config['speaking_rate'],
-                pitch=0.0,
                 effects_profile_id=['telephony-class-application']
             )
             
@@ -70,12 +94,10 @@ class GoogleTTSService:
                 audio_config=audio_config
             )
             
-            audio_base64 = base64.b64encode(response.audio_content).decode('utf-8')
-            print(f"Google TTS synthesized: {len(text)} chars | Voice: {voice_name} | Code: {lang_code}")
-            return audio_base64
+            return base64.b64encode(response.audio_content).decode('utf-8')
             
         except Exception as e:
-            print(f"✗ Error synthesizing speech: {e}")
-            raise Exception(f"Google TTS synthesis failed: {e}")
+            print(f"Error synthesizing speech: {e}")
+            return None
 
 google_tts_service = GoogleTTSService()

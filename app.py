@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import Config
 from utils.db import db_instance
 from routes.call_routes import router as call_router
+from routes.stream_routes import router as stream_router
 import sys
 import uvicorn
 import os
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
 
     # Include Routes
     app.include_router(call_router)
+    app.include_router(stream_router)
 
     # Health Check
     @app.get("/health")
