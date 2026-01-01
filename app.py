@@ -16,9 +16,9 @@ def create_app() -> FastAPI:
         print("="*60)
         for error in config_errors:
             if "WARNING" in error:
-                print(f"⚠️  {error}")
+                print(f"  {error}")
             else:
-                print(f"❌ {error}")
+                print(f" {error}")
         print("="*60)
         
         critical_errors = [e for e in config_errors if "WARNING" not in e]
@@ -32,9 +32,9 @@ def create_app() -> FastAPI:
     # Check MongoDB
     try:
         db_instance.connect()
-        print("✓ MongoDB connected successfully")
+        print("MongoDB connected successfully")
     except Exception as e:
-        print(f"❌ MongoDB connection failed: {str(e)}")
+        print(f"MongoDB connection failed: {str(e)}")
         sys.exit(1)
         
     # Check Google TTS
@@ -42,9 +42,9 @@ def create_app() -> FastAPI:
         from services.google_tts_service import google_tts_service
         if not google_tts_service.client:
             raise Exception("Google TTS client not initialized")
-        print("✓ Google Cloud TTS initialized successfully\n")
+        print("Google Cloud TTS initialized successfully\n")
     except Exception as e:
-        print(f"❌ CRITICAL: Google Cloud TTS initialization failed: {str(e)}")
+        print(f"CRITICAL: Google Cloud TTS initialization failed: {str(e)}")
         sys.exit(1)
 
     # 3. Create App
@@ -111,7 +111,7 @@ app = create_app()
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("🚀 STARTING EMI RECOVERY AGENT (FastAPI)")
+    print("STARTING EMI RECOVERY AGENT (FastAPI)")
     print("="*60)
     print("👉 Swagger UI: http://localhost:8000/docs")
     print("👉 Base URL:   http://localhost:8000")

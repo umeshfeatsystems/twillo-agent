@@ -103,5 +103,4 @@ test_credentials.py
 test_available_models.py
 tts_cache
 
-
-
+service_account.json

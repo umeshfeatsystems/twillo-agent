@@ -62,10 +62,10 @@ class Config:
     @staticmethod
     def print_config():
         print("\n" + "="*60)
-        print("📋 CONFIGURATION (FastAPI)")
+        print("CONFIGURATION (FastAPI)")
         print("="*60)
         print(f"MongoDB URI: {Config.MONGODB_URI[:30]}...")
-        print(f"Gemini API Key: {'✓ Set' if Config.GEMINI_API_KEY else '✗ Missing'}")
+        print(f"Gemini API Key: {' Set' if Config.GEMINI_API_KEY else '✗ Missing'}")
         print(f"Twilio Account SID: {Config.TWILIO_ACCOUNT_SID[:10] if Config.TWILIO_ACCOUNT_SID else '✗ Missing'}...")
         print(f"Twilio Phone: {Config.TWILIO_PHONE_NUMBER if Config.TWILIO_PHONE_NUMBER else '✗ Missing'}")
         print(f"Bank Name: {Config.BANK_NAME}")
@@ -74,7 +74,7 @@ class Config:
         print(f"Default Language: {Config.DEFAULT_LANGUAGE}")
         
         if Config.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(Config.GOOGLE_APPLICATION_CREDENTIALS):
-            print(f"Google TTS: ✓ ENABLED (credentials found)")
+            print(f"Google TTS:  ENABLED (credentials found)")
         else:
             print(f"Google TTS: ✗ CRITICAL ERROR - Credentials missing")
         

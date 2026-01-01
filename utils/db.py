@@ -16,7 +16,7 @@ class Database:
         if self._client is None:
             self._client = MongoClient(Config.MONGODB_URI)
             self._db = self._client.get_default_database()
-            print("✓ Connected to MongoDB")
+            print("Connected to MongoDB")
         return self._db
     
     def get_db(self):
@@ -29,7 +29,7 @@ class Database:
         """Close MongoDB connection"""
         if self._client:
             self._client.close()
-            print("✓ MongoDB connection closed")
+            print("MongoDB connection closed")
 
 # Global database instance
 db_instance = Database()

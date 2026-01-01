@@ -1,334 +1,148 @@
-from fastapi import APIRouter, Request, Response, Form, HTTPException, WebSocket, BackgroundTasks, Query
-from fastapi.responses import JSONResponse, FileResponse
-from twilio.twiml.voice_response import VoiceResponse
-from models.customer import Customer
-from services.gemini_service import GeminiService
+from fastapi import APIRouter, BackgroundTasks, Form, Request, Response, HTTPException
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
 from services.twilio_service import TwilioService
+from services.gemini_service import gemini_service
+from models.session import CallSession
+from prompts import SYSTEM_PROMPT_TEMPLATE, INITIAL_GREETING_TEMPLATE
+from datetime import datetime
 from utils.audio_cache import AudioCache
 from config import Config
-from language_config import LanguageConfig
-from datetime import datetime
-import os
-import json
-from pydantic import BaseModel, validator
-from typing import Optional
+import logging
 
-router = APIRouter(prefix="/api/call", tags=["Call Logic"])
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("CallRoutes")
 
-gemini_service = GeminiService()
+router = APIRouter(prefix="/api/call", tags=["Generic Call Logic"])
 twilio_service = TwilioService()
 
-if not os.path.exists('data'):
-    os.makedirs('data')
-
-# --- DATA MODELS ---
-
-class InitiateCallRequest(BaseModel):
-    customer_id: str
-    language: Optional[str] = None 
-
-    @validator('language')
-    def validate_language(cls, v):
-        if v and v.lower() == 'hybrid':
-            return 'en-hi-hybrid'
-        if v is not None and not LanguageConfig.is_valid_language(v):
-            valid_langs = list(LanguageConfig.SUPPORTED_LANGUAGES.keys())
-            valid_langs.append('hybrid') 
-            raise ValueError(f"Unsupported language '{v}'. Supported: {valid_langs}")
-        return v
-
-# --- BACKGROUND TASKS ---
-
-def bg_process_turn(customer_id: str, call_sid: str, turn_data: dict, audio_filename: str, bot_text: str, language: str, voice_override: str):
-    """
-    Combined Background Task:
-    1. Generate TTS Audio (Heavy Operation)
-    2. Log to Database (IO Operation)
-    """
-    # 1. Generate Audio (This unblocks the /tts-audio endpoint)
-    if bot_text:
-        twilio_service.generate_audio_background(bot_text, audio_filename, language, voice_override)
-    else:
-        # If no text, release the lock with empty bytes to prevent hanging
-        AudioCache.set(audio_filename, b'')
-    
-    # 2. Update DB
-    try:
-        update_fields = {
-            '$push': {'call_history.$.conversation_history': turn_data}
-        }
-        
-        # If state change is requested
-        if 'next_state' in turn_data:
-             update_fields['$set'] = {'call_history.$.call_state': turn_data['next_state']}
-             # clean up temp field before saving if present (though we construct turn_data manually below)
-        
-        # If language switch happened
-        if 'new_lang_state' in turn_data and turn_data['new_lang_state']:
-            if '$set' not in update_fields: update_fields['$set'] = {}
-            update_fields['$set']['call_history.$.language'] = turn_data['new_lang_state']
-
-        Customer.get_collection().update_one(
-            {'call_history.call_id': call_sid},
-            update_fields
-        )
-    except Exception as e:
-        print(f"Error logging: {e}")
-
-# --- API ROUTES ---
+# --- INPUT MODEL ---
+class CallRequest(BaseModel):
+    phone_number: str
+    call_details: Dict[str, Any] 
 
 @router.post('/initiate')
-async def initiate_call(request: InitiateCallRequest):
+async def initiate_call(request: CallRequest):
+    logger.info(f"[INITIATE] Request for {request.phone_number}")
     try:
-        customer_id = request.customer_id
-        target_language = request.language if request.language else Config.DEFAULT_LANGUAGE
-        
-        customer = Customer.find_by_id(customer_id)
-        if not customer:
-            return JSONResponse({'error': 'Customer not found'}, status_code=404)
-        
-        call_result = twilio_service.initiate_call(
-            customer['phone'],
-            customer['customer_id']
+        # 1. Prepare Prompt
+        formatted_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            name=request.call_details.get('name', 'Customer'),
+            amount=request.call_details.get('amount', 'unknown amount'),
+            bank_name=request.call_details.get('bank_name', Config.BANK_NAME),
+            loan_type=request.call_details.get('loan_type', 'loan'),
+            due_date=request.call_details.get('due_date', 'today')
         )
+
+        formatted_greeting = INITIAL_GREETING_TEMPLATE.format(
+            name=request.call_details.get('name', 'Customer')
+        )
+
+        # 2. Create Session
+        session_id = CallSession.create(
+            phone=request.phone_number,
+            system_prompt=formatted_system_prompt,
+            initial_greeting=formatted_greeting,
+            call_details=request.call_details
+        )
+        logger.info(f"[SESSION] Created Session: {session_id}")
         
-        if call_result['success']:
-            call_record = {
-                'call_id': call_result['call_sid'],
-                'call_ref': call_result['call_ref'],
-                'timestamp': datetime.utcnow().isoformat(),
-                'status': 'initiated',
-                'outcome': 'pending',
-                'conversation_history': [], 
-                'duration': 0,
-                'call_state': 'CONNECTING',
-                'language': target_language,
-                'unclear_count': 0,
-                'context': {},
-                'partial_transcript': ''
-            }
-            Customer.update_call_history(customer_id, call_record)
-            return {'success': True, 'call_sid': call_result['call_sid']}
+        # 3. Trigger Call
+        result = twilio_service.initiate_call(request.phone_number, session_id)
+        
+        if result['success']:
+            CallSession.update_call_sid(session_id, result['call_sid'])
+            logger.info(f"[TWILIO] Call Initiated. SID: {result['call_sid']}")
+            return {"success": True, "session_id": session_id, "call_sid": result['call_sid']}
         else:
-            return JSONResponse({'success': False, 'error': call_result['error']}, status_code=500)
+            logger.error(f"[TWILIO] Failed: {result['error']}")
+            return {"success": False, "error": result['error']}
+
     except Exception as e:
-        return JSONResponse({'error': str(e)}, status_code=500)
+        logger.error(f"[INITIATE] Error: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.post('/handle-answer')
+async def handle_answer(background_tasks: BackgroundTasks, session_id: str):
+    logger.info(f"[HANDLE-ANSWER] Call Answered for Session: {session_id}")
+    
+    session = CallSession.find_by_session_id(session_id)
+    if not session: 
+        logger.error("Session Not Found")
+        return Response(status_code=404)
+
+    greeting_text = session['initial_greeting']
+    logger.info(f"[BOT] Greeting: {greeting_text}")
+    
+    # Prepare Audio
+    audio_filename = twilio_service.prepare_audio_placeholder()
+    
+    # Schedule Generation
+    background_tasks.add_task(twilio_service.generate_audio_background, greeting_text, audio_filename)
+    
+    # Log History
+    CallSession.append_history(session_id, {"role": "assistant", "content": greeting_text})
+
+    return Response(content=twilio_service.generate_async_twiml(audio_filename, session_id), media_type="application/xml")
+
+@router.post('/process-response')
+async def process_response(background_tasks: BackgroundTasks, session_id: str, SpeechResult: str = Form('')):
+    logger.info(f"[USER SPEECH] Session {session_id} | Said: '{SpeechResult}'")
+    
+    session = CallSession.find_by_session_id(session_id)
+    if not session: return Response(status_code=404)
+
+    # 1. AI Processing
+    ai_decision = gemini_service.get_generic_response(
+        system_prompt=session['system_prompt'], 
+        conversation_history=session.get('conversation_history', []),
+        user_input=SpeechResult
+    )
+    
+    bot_text = ai_decision['response_text']
+    logger.info(f"[AI DECISION] Response: '{bot_text}' | Hangup: {ai_decision['should_hangup']}")
+
+    # 2. Audio Generation
+    audio_filename = twilio_service.prepare_audio_placeholder()
+    background_tasks.add_task(twilio_service.generate_audio_background, bot_text, audio_filename)
+    
+    # 3. Update History
+    CallSession.append_history(session_id, {"role": "user", "content": SpeechResult})
+    CallSession.append_history(session_id, {"role": "assistant", "content": bot_text})
+
+    # 4. Return TwiML
+    if ai_decision['should_hangup']:
+        return Response(content=twilio_service.generate_goodbye_twiml(bot_text), media_type="application/xml")
+    
+    return Response(content=twilio_service.generate_async_twiml(audio_filename, session_id), media_type="application/xml")
+
+# --- MISSING STATUS ENDPOINT FIXED HERE ---
+@router.post('/status')
+async def call_status(CallSid: str = Form(...), CallStatus: str = Form(...)):
+    """
+    Twilio hits this endpoint to report status changes (ringing, answered, completed).
+    """
+    logger.info(f"[STATUS] SID: {CallSid} | Status: {CallStatus}")
+    
+    # Ideally, update your Session DB status here
+    # CallSession.update_status(CallSid, CallStatus)
+    
+    return Response(status_code=200)
 
 @router.get('/tts-audio/{filename}')
 async def serve_tts_audio(filename: str):
     """
-    BLOCKING ENDPOINT:
-    Waits for the audio to be generated by the background task.
+    Blocking endpoint that waits for audio to be generated.
     """
-    # Wait up to 5 seconds for audio to appear in RAM
-    audio_data = AudioCache.get_with_wait(filename, timeout=5)
+    logger.info(f"[AUDIO REQUEST] Fetching: {filename}")
+    
+    # INCREASED TIMEOUT to 10s to prevent 404s
+    audio_data = AudioCache.get_with_wait(filename, timeout=10)
     
     if audio_data is None:
-        print(f"✗ Audio Timeout/Miss: {filename}")
+        logger.error(f"[AUDIO MISS] Timeout/Redacted: {filename}")
         return Response(status_code=404)
         
+    logger.info(f"[AUDIO SERVED] Sending bytes for: {filename}")
     return Response(content=audio_data, media_type='audio/mpeg')
-
-@router.post('/handle-answer')
-async def handle_answer(background_tasks: BackgroundTasks, customer_id: str, CallSid: str = Form(...), AnsweredBy: str = Form('human')):
-    if AnsweredBy != 'human':
-        return Response(content=twilio_service.generate_hangup_for_machine_twiml(), media_type="application/xml")
-    
-    customer = Customer.find_by_id(customer_id)
-    # Get call record to find language, or default
-    call_record = next((c for c in customer.get('call_history', []) if c['call_id'] == CallSid), None)
-    language = call_record.get('language', Config.DEFAULT_LANGUAGE) if call_record else Config.DEFAULT_LANGUAGE
-    
-    voice_override = LanguageConfig.HYBRID_VOICE_NAME if language == 'en-hi-hybrid' else None
-    
-    # 1. Generate Text
-    script = gemini_service.generate_verification_script(customer, Config.BANK_NAME, language)
-    
-    # 2. Prepare Async Audio Placeholder
-    audio_filename = twilio_service.prepare_audio_placeholder()
-    
-    # 3. Schedule Background Task
-    turn_data = {
-        'timestamp': datetime.utcnow().isoformat(),
-        'bot_response': script,
-        'intent': 'VERIFICATION_INITIATED',
-        'next_state': 'AWAITING_VERIFICATION'
-    }
-    
-    background_tasks.add_task(
-        bg_process_turn, 
-        customer_id, CallSid, turn_data, audio_filename, script, language, voice_override
-    )
-    
-    # 4. Return TwiML immediately
-    twiml = twilio_service.generate_async_twiml(audio_filename, customer_id, language)
-    return Response(content=twiml, media_type="application/xml")
-
-@router.post('/process-response')
-async def process_response(
-    background_tasks: BackgroundTasks,
-    customer_id: str, 
-    CallSid: str = Form(...), 
-    SpeechResult: str = Form(None)
-):
-    try:
-        speech_result = SpeechResult if SpeechResult else ''
-        customer = Customer.find_by_id(customer_id)
-        call_record = next((c for c in customer.get('call_history', []) if c['call_id'] == CallSid), None)
-        
-        session_language = call_record.get('language', Config.DEFAULT_LANGUAGE)
-        current_state = call_record.get('call_state', 'CONVERSATION')
-        conversation_history = call_record.get('conversation_history', [])
-        
-        voice_override = LanguageConfig.HYBRID_VOICE_NAME if session_language == 'en-hi-hybrid' else None
-        
-        # 1. Reserve Audio File Name IMMEDIATELY
-        audio_filename = twilio_service.prepare_audio_placeholder()
-        
-        # 2. Logic & AI Processing
-        bot_text = ""
-        next_state = current_state
-        intent = "UNKNOWN"
-        new_lang_state = None
-        
-        if current_state == 'AWAITING_VERIFICATION':
-            bot_decision = gemini_service.analyze_verification(speech_result, customer, session_language)
-            intent = bot_decision.get('intent')
-            followup_text = bot_decision.get('polite_bot_response')
-            detected_lang = bot_decision.get('detected_language')
-            confidence = bot_decision.get('confidence', 0.0)
-
-            # Language Switch Check
-            if (detected_lang and 
-                detected_lang != session_language and 
-                detected_lang != 'en-hi-hybrid' and
-                confidence > 0.7):
-                print(f"🔀 Language switch: {session_language} -> {detected_lang}")
-                session_language = detected_lang
-                new_lang_state = detected_lang
-
-            if intent == 'CONFIRMED_IDENTITY':
-                next_state = 'CONVERSATION'
-                emi_script = gemini_service.generate_emi_details_script(customer, session_language)
-                bot_text = f"{followup_text}... {emi_script}"
-            elif intent == 'DENIED_IDENTITY':
-                next_state = 'HANGUP'
-                bot_text = followup_text
-            else:
-                next_state = 'AWAITING_VERIFICATION'
-                bot_text = followup_text
-        else:
-            # Main Conversation Logic
-            bot_decision = gemini_service.get_bot_response(
-                current_state, speech_result, customer, 
-                conversation_history, session_language
-            )
-            bot_text = bot_decision.get('polite_bot_response')
-            intent = bot_decision.get('intent')
-            next_state = bot_decision.get('next_state')
-            
-            # Explicit Language Switch
-            if bot_decision.get('switch_language_to'):
-                new_lang = bot_decision.get('switch_language_to')
-                session_language = new_lang
-                new_lang_state = new_lang
-
-        # 3. Schedule Background Task
-        turn_data = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'customer_response': speech_result,
-            'bot_response': bot_text,
-            'intent': intent,
-            'next_state': next_state,
-            'new_lang_state': new_lang_state
-        }
-        
-        background_tasks.add_task(
-            bg_process_turn, 
-            customer_id, CallSid, turn_data, audio_filename, bot_text, session_language, voice_override
-        )
-
-        # 4. Return TwiML IMMEDIATELY
-        if next_state == 'HANGUP':
-            # For goodbye, we can use the async method too, or just legacy sync for simplicity. 
-            # Using async ensures the audio cache logic is consistent.
-            twiml = twilio_service.generate_goodbye_twiml(bot_text, session_language, voice_override)
-            return Response(content=twiml, media_type="application/xml")
-            
-        elif next_state == 'PENDING_TRANSFER':
-            twiml = twilio_service.generate_transfer_twiml(bot_text, session_language, voice_override)
-            return Response(content=twiml, media_type="application/xml")
-            
-        else:
-            # Continue conversation with Async Audio
-            twiml = twilio_service.generate_async_twiml(audio_filename, customer_id, session_language)
-            return Response(content=twiml, media_type="application/xml")
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return Response(content=str(VoiceResponse().hangup()), media_type="application/xml")
-
-@router.post('/status')
-async def call_status(CallSid: str = Form(...), CallStatus: str = Form(...), CallDuration: int = Form(0)):
-    try:
-        collection = Customer.get_collection()
-        collection.update_one(
-            {'call_history.call_id': CallSid},
-            {
-                '$set': {
-                    'call_history.$.status': CallStatus,
-                    'call_history.$.duration': int(CallDuration)
-                }
-            }
-        )
-        return Response(status_code=200)
-    except Exception as e:
-        print(f"Error in call_status: {str(e)}")
-        return Response(status_code=200)
-
-@router.post('/handle-transfer-status')
-async def handle_transfer_status(CallSid: str = Form(...), DialCallStatus: str = Form(...)):
-    try:
-        response = VoiceResponse()
-        if DialCallStatus == 'completed':
-            response.say("Thank you for speaking with our specialist. Goodbye.")
-            response.hangup()
-        elif DialCallStatus in ['no-answer', 'busy', 'failed', 'canceled']:
-            response.say("Our specialist is unavailable. We'll call you back. Goodbye.")
-            response.hangup()
-        else:
-            response.hangup()
-        return Response(content=str(response), media_type="application/xml")
-    except Exception as e:
-        print(f"Error in handle_transfer_status: {str(e)}")
-        response = VoiceResponse()
-        response.hangup()
-        return Response(content=str(response), media_type="application/xml")
-
-@router.post('/handle-recording')
-async def handle_recording(CallSid: str = Form(...), RecordingUrl: str = Form(None)):
-    try:
-        if not RecordingUrl:
-            return Response(status_code=200)
-        
-        # Just store the URL
-        collection = Customer.get_collection()
-        collection.update_one(
-            {'call_history.call_id': CallSid},
-            {'$set': {'call_history.$.recording_url': RecordingUrl}}
-        )
-        return Response(status_code=200)
-    except Exception as e:
-        print(f"Error in handle_recording: {str(e)}")
-        return Response(status_code=200)
-
-@router.get('/customers/{customer_id}')
-async def get_customer(customer_id: str):
-    try:
-        customer = Customer.find_by_id(customer_id)
-        if not customer:
-            return JSONResponse({'error': 'Customer not found'}, status_code=404)
-        customer['_id'] = str(customer['_id'])
-        return customer
-    except Exception as e:
-        return JSONResponse({'error': str(e)}, status_code=500)

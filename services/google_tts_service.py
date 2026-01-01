@@ -12,7 +12,7 @@ class GoogleTTSService:
                 # Set environment variable for Google Cloud SDK
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = Config.GOOGLE_APPLICATION_CREDENTIALS
                 self.client = texttospeech.TextToSpeechClient()
-                print("✓ Google Cloud TTS client initialized successfully")
+                print("Google Cloud TTS client initialized successfully")
             except Exception as e:
                 print(f"✗ CRITICAL: Failed to initialize Google TTS: {e}")
                 print(f"✗ Check if credentials file exists at: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
@@ -71,7 +71,7 @@ class GoogleTTSService:
             )
             
             audio_base64 = base64.b64encode(response.audio_content).decode('utf-8')
-            print(f"✓ Google TTS synthesized: {len(text)} chars | Voice: {voice_name} | Code: {lang_code}")
+            print(f"Google TTS synthesized: {len(text)} chars | Voice: {voice_name} | Code: {lang_code}")
             return audio_base64
             
         except Exception as e:
