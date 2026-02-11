@@ -1,35 +1,46 @@
-import google.generativeai as genai
-from config import Config
-import json
 import logging
+
+import google.generativeai as genai
+
+from config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("GeminiService")
 
+
 class GeminiService:
     def __init__(self):
-        genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self.model = None
+        try:
+            if not Config.GEMINI_API_KEY:
+                logger.warning("Gemini API key missing. LLM responses will be unavailable.")
+                return
+            genai.configure(api_key=Config.GEMINI_API_KEY)
+            self.model = genai.GenerativeModel(Config.GEMINI_MODEL)
+        except Exception as exc:
+            logger.error("Gemini initialization failed: %s", exc)
+            self.model = None
 
     def get_streaming_response(self, system_prompt, conversation_history, user_input):
         """
-        Streams text chunks immediately. 
-        Forces Plain Text mode for lowest latency.
+        Streams text chunks immediately and keeps responses concise for voice calls.
         """
-        # 1. Format History
+        if not self.model:
+            yield "I am having trouble connecting right now. Please try again."
+            return
+
         history_text = ""
         for turn in conversation_history[-6:]:
-            role = "User" if turn['role'] == 'user' else "AI"
+            role = "User" if turn["role"] == "user" else "AI"
             history_text += f"{role}: {turn['content']}\n"
 
-        # 2. Prompt - Explicitly ask for TEXT, not JSON
         streaming_prompt = f"""
         {system_prompt}
         
         INSTRUCTIONS: 
-        - IGNORE all previous instructions about JSON format.
         - Reply naturally in plain text.
         - Keep it under 2 sentences.
+        - Think step-by-step internally, but never reveal internal reasoning.
         
         --- HISTORY ---
         {history_text}
@@ -37,24 +48,23 @@ class GeminiService:
         """
 
         try:
-            # 3. Stream = True
             response_stream = self.model.generate_content(
-                streaming_prompt, 
-                stream=True, 
+                streaming_prompt,
+                stream=True,
                 generation_config={
-                    "response_mime_type": "text/plain", 
+                    "response_mime_type": "text/plain",
                     "max_output_tokens": 250,
-                    "temperature": 0.3
-                }
+                    "temperature": 0.3,
+                },
             )
-            
-            # 4. Yield text as it arrives
+
             for chunk in response_stream:
                 if chunk.text:
                     yield chunk.text
-                    
-        except Exception as e:
-            logger.error(f"Gemini Streaming Error: {e}")
-            yield "I didn't catch that."
+
+        except Exception as exc:
+            logger.error("Gemini streaming error: %s", exc)
+            yield "I did not catch that."
+
 
 gemini_service = GeminiService()
