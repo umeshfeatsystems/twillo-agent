@@ -9,7 +9,7 @@ logger = logging.getLogger("GeminiService")
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
 
     def get_streaming_response(self, system_prompt, conversation_history, user_input):
         """
