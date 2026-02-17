@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 
 from config import Config
 from routes.call_routes import router as call_router
+from routes.customer_routes import router as customer_router, prompt_router
 
 from services.gemini_service import gemini_service
 from services.sarvam_service import sarvam_service
@@ -64,6 +65,8 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(call_router)
+    app.include_router(customer_router)
+    app.include_router(prompt_router)
 
 
     @app.get("/health")

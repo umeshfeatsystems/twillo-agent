@@ -4,97 +4,284 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EMI Call Agent - Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <title>EMI Call Agent — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 
 <body>
-    <div class="container">
-        <header>
-            <h1>📞 EMI Recovery Call Agent</h1>
-            <p class="subtitle">Automated call initiation dashboard</p>
-        </header>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">📞</div>
+            <div>
+                <h1>EMI Agent</h1>
+                <span class="brand-sub">Recovery Dashboard</span>
+            </div>
+        </div>
 
-        <main>
+        <nav class="sidebar-nav">
+            <button class="nav-btn active" data-tab="dashboard">
+                <span class="nav-icon">📊</span>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-btn" data-tab="customers">
+                <span class="nav-icon">👥</span>
+                <span>Customers</span>
+            </button>
+            <button class="nav-btn" data-tab="prompt">
+                <span class="nav-icon">📝</span>
+                <span>Prompt Editor</span>
+            </button>
+            <button class="nav-btn" data-tab="tone">
+                <span class="nav-icon">🎙️</span>
+                <span>Tone & Voice</span>
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="status-dot"></div>
+            <span>System Online</span>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+        <!-- ═══ DASHBOARD TAB ═══ -->
+        <section class="tab-panel active" id="tab-dashboard">
+            <div class="page-header">
+                <div>
+                    <h2>Dashboard</h2>
+                    <p class="page-desc">Quick call & recent history</p>
+                </div>
+                <button class="btn-accent" id="openAddUserBtn" onclick="showModal()">
+                    <span>＋</span> New Call
+                </button>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-value" id="statTotalCalls">0</div>
+                    <div class="stat-label">Total Calls</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statCustomers">0</div>
+                    <div class="stat-label">Customers</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statToday">0</div>
+                    <div class="stat-label">Today</div>
+                </div>
+            </div>
+
+            <!-- Recent Calls Table -->
             <div class="card">
-                <h2>Initiate Call</h2>
+                <div class="card-header">
+                    <h3>Recent Calls</h3>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Phone</th>
+                                <th>Amount</th>
+                                <th>Overdue</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="callHistoryBody">
+                            <tr>
+                                <td colspan="7" class="empty-msg">No calls yet</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
 
-                <form id="callForm">
-                    <div class="form-group">
-                        <label for="callType">Call Type</label>
-                        <select id="callType" name="callType" required>
-                            <option value="">Select call type...</option>
-                            <option value="emi_reminder" selected>EMI Reminder</option>
-                            <option value="payment_followup">Payment Follow-up</option>
-                            <option value="verification_call">Verification Call</option>
-                        </select>
+        <!-- ═══ CUSTOMERS TAB ═══ -->
+        <section class="tab-panel" id="tab-customers">
+            <div class="page-header">
+                <div>
+                    <h2>Customers</h2>
+                    <p class="page-desc">Manage your customer database</p>
+                </div>
+                <button class="btn-accent" onclick="showModal()">
+                    <span>＋</span> Add Customer
+                </button>
+            </div>
+
+            <div class="card">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Amount (₹)</th>
+                                <th>Loan Type</th>
+                                <th>Days Overdue</th>
+                                <th>Last Called</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customersBody">
+                            <tr>
+                                <td colspan="7" class="empty-msg">No customers added</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ PROMPT EDITOR TAB ═══ -->
+        <section class="tab-panel" id="tab-prompt">
+            <div class="page-header">
+                <div>
+                    <h2>Prompt Editor</h2>
+                    <p class="page-desc">Customize the EMI agent conversation prompt</p>
+                </div>
+                <div class="btn-group">
+                    <button class="btn-outline" id="resetPromptBtn">Reset to Default</button>
+                    <button class="btn-accent" id="savePromptBtn">💾 Save Prompt</button>
+                </div>
+            </div>
+
+            <div class="prompt-grid">
+                <div class="card">
+                    <h3>System Prompt</h3>
+                    <p class="field-desc">The main instructions that guide the agent's behavior</p>
+                    <textarea id="systemPrompt" rows="20" spellcheck="false"></textarea>
+                </div>
+                <div class="card">
+                    <h3>Initial Greeting</h3>
+                    <p class="field-desc">The first message the agent speaks when the call connects</p>
+                    <textarea id="initialGreeting" rows="3" spellcheck="false"></textarea>
+
+                    <h3 style="margin-top:1.5rem">Available Variables</h3>
+                    <div class="var-chips">
+                        <span class="chip">{name}</span>
+                        <span class="chip">{bank_name}</span>
+                        <span class="chip">{amount}</span>
+                        <span class="chip">{loan_type}</span>
+                        <span class="chip">{due_date}</span>
+                        <span class="chip">{days_overdue}</span>
                     </div>
 
-                    <div class="form-group">
-                        <label for="languageMode">Language Mode</label>
-                        <select id="languageMode" name="languageMode" required>
-                            <option value="hi-en" selected>Bilingual (Ask user preference)</option>
-                            <option value="en">English Only</option>
-                            <option value="hi">Hindi Only</option>
-                        </select>
-                        <small>Bilingual mode asks customer to choose language at call start</small>
-                    </div>
+                    <div id="promptStatus" class="prompt-status" style="display:none"></div>
+                </div>
+            </div>
+        </section>
 
-                    <div class="form-group">
-                        <label for="phoneNumber">Phone Number</label>
-                        <input type="tel" id="phoneNumber" name="phoneNumber" placeholder="+919876543210" required>
-                        <small>Include country code (e.g., +91)</small>
-                    </div>
+        <!-- ═══ TONE & VOICE TAB ═══ -->
+        <section class="tab-panel" id="tab-tone">
+            <div class="page-header">
+                <div>
+                    <h2>Tone & Voice</h2>
+                    <p class="page-desc">Set the speaking style for calls</p>
+                </div>
+            </div>
 
+            <div class="tone-grid" id="toneGrid">
+                <!-- Filled by JS -->
+            </div>
+
+            <div class="card" style="margin-top:1.5rem">
+                <h3>Custom Tone Instructions</h3>
+                <p class="field-desc">Add extra instructions to fine-tune the agent's speaking style</p>
+                <textarea id="customTone" rows="4"
+                    placeholder="e.g., Speak slowly and clearly. Use the customer's first name frequently."></textarea>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ═══ MODAL: Add Customer / Quick Call ═══ -->
+    <div class="modal-overlay" id="modal" onclick="hideModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>New Call</h3>
+                <button class="modal-close" onclick="hideModal()">&times;</button>
+            </div>
+            <form id="callForm">
+                <div class="form-row">
                     <div class="form-group">
                         <label for="name">Customer Name</label>
                         <input type="text" id="name" name="name" placeholder="Amit Sharma" required>
                     </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="amount">Amount (INR)</label>
-                            <input type="number" id="amount" name="amount" placeholder="15000" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="daysOverdue">Days Overdue</label>
-                            <input type="number" id="daysOverdue" name="daysOverdue" placeholder="5" required>
-                        </div>
+                    <div class="form-group">
+                        <label for="phoneNumber">Phone Number</label>
+                        <input type="tel" id="phoneNumber" name="phoneNumber" placeholder="+919876543210" required>
                     </div>
+                </div>
 
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="loanType">Loan Type</label>
-                            <input type="text" id="loanType" name="loanType" placeholder="Personal Loan"
-                                value="Personal Loan">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="dueDate">Due Date</label>
-                            <input type="date" id="dueDate" name="dueDate">
-                        </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="amount">Amount (₹)</label>
+                        <input type="number" id="amount" name="amount" placeholder="15000" required>
                     </div>
+                    <div class="form-group">
+                        <label for="daysOverdue">Days Overdue</label>
+                        <input type="number" id="daysOverdue" name="daysOverdue" placeholder="5" required>
+                    </div>
+                </div>
 
-                    <button type="submit" class="btn-primary" id="callBtn">
-                        <span class="btn-icon">📞</span>
-                        <span class="btn-text">Initiate Call</span>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="loanType">Loan Type</label>
+                        <select id="loanType" name="loanType">
+                            <option value="Personal Loan">Personal Loan</option>
+                            <option value="Home Loan">Home Loan</option>
+                            <option value="Car Loan">Car Loan</option>
+                            <option value="Business Loan">Business Loan</option>
+                            <option value="Education Loan">Education Loan</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="dueDate">Due Date</label>
+                        <input type="date" id="dueDate" name="dueDate">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="languageMode">Language</label>
+                        <select id="languageMode" name="languageMode">
+                            <option value="hi-en" selected>Auto-detect (Bilingual)</option>
+                            <option value="en">English Only</option>
+                            <option value="hi">Hindi Only</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bankName">Bank Name</label>
+                        <input type="text" id="bankName" name="bankName" value="HDFC Bank">
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="saveCustomer" checked>
+                        Save customer for future calls
+                    </label>
+                    <button type="submit" class="btn-accent btn-lg" id="callBtn">
+                        <span class="btn-text">📞 Initiate Call</span>
                     </button>
-                </form>
-            </div>
+                </div>
+            </form>
 
-            <div class="card status-card" id="statusCard" style="display: none;">
-                <h3>Call Status</h3>
-                <div id="statusContent"></div>
-            </div>
-        </main>
-
-        <footer>
-            <p>Powered by Sarvam AI • Twilio • Gemini</p>
-        </footer>
+            <!-- Call Status -->
+            <div id="modalStatus" style="display:none"></div>
+        </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=2"></script>
 </body>
 
 </html>
