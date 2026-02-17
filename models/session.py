@@ -31,6 +31,11 @@ class CallSession:
     @staticmethod
     def update_call_sid(sid, call_sid):
         CallSession.get_collection().update_one({'session_id': sid}, {'$set': {'call_sid': call_sid}})
+    
+    @staticmethod
+    def update_session(sid, updates):
+        """Update session with arbitrary fields"""
+        CallSession.get_collection().update_one({'session_id': sid}, {'$set': updates})
 
     @staticmethod
     def append_history(sid, turn):

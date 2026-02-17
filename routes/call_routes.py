@@ -48,9 +48,17 @@ LANGUAGE_MODE_ALIASES = {
 }
 
 HINDI_HINT_WORDS = {
+    # Common Hindi words in Roman script
     "haan", "nahi", "namaste", "achha", "theek", "paisa", "kal", "aaj", 
     "baad", "baadme", "kripya", "bhai", "sirf", "kyu", "kyun", "kab", 
-    "kaise", "mera", "meri", "mujhe", "aap", "hum"
+    "kaise", "mera", "meri", "mujhe", "aap", "hum",
+    # Very common Hinglish
+    "ji", "bilkul", "kya", "hai", "ho", "hu", "hoon", "bola", "bolo", "bolraha",
+    "naa", "na", "thik", "thodi", "abhi", "phir", "matlab", "woh", "yeh",
+    "kuch", "kaha", "kahe", "arre", "are", "matlab", "baat", "batao", "samjhe",
+    "chahiye", "chahta", "chahti", "karo", "karna", "karenge", "karoge",
+    "dena", "denge", "diya", "lena", "lenge", "liya", "paise", "rupaye",
+    "bank", "payment", "emi", "loan", "bhugtan", "de", "le", "kar", "karo"
 }
 
 DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
@@ -93,15 +101,22 @@ def _stt_candidates(mode: str, last_user_language: str) -> Iterable[str]:
     return [first, second]
 
 def _detect_user_language(text: str, stt_language: Optional[str]) -> str:
-    if stt_language in ("en-IN", "hi-IN"):
-        if stt_language == "hi-IN": return "hi-IN"
+    # Trust Sarvam's STT language detection first
+    if stt_language == "hi-IN":
+        return "hi-IN"
     
     lowered = text.lower()
-    if DEVANAGARI_RE.search(text): return "hi-IN"
     
+    # Devanagari script = definitely Hindi
+    if DEVANAGARI_RE.search(text):
+        return "hi-IN"
+    
+    # Check for Hindi hint words (even 1 is a strong signal in Indian context)
     tokens = re.findall(r"[a-zA-Z]+", lowered)
     hint_hits = sum(1 for token in tokens if token in HINDI_HINT_WORDS)
-    if hint_hits >= 2: return "hi-IN"
+    if hint_hits >= 1:  # Lowered threshold from 2 to 1
+        return "hi-IN"
+    
     return "en-IN"
 
 def _select_response_language(mode: str, user_text: str, stt_language: Optional[str]) -> str:
@@ -300,7 +315,17 @@ async def websocket_endpoint(websocket: WebSocket):
             db_dur = time.time() - db_start
 
             mode = _resolve_language_mode(session)
-            candidates = _stt_candidates(mode, language_state["last_user_language"])
+            
+            # Check if language already locked (after first turn)
+            locked_language = session.get("locked_language") if session else None
+            
+            if locked_language:
+                # Language already locked from first turn — use it
+                response_language = locked_language
+                candidates = [locked_language]
+            else:
+                # First turn or no lock — detect language
+                candidates = _stt_candidates(mode, language_state["last_user_language"])
 
             # --- STT ---
             stt_start = time.time()
@@ -310,8 +335,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info("[LATENCY] STT=%.3fs (no text) | audio=%.2fs", stt_dur, audio_duration_s)
                 return
 
-            response_language = _select_response_language(mode, user_text, stt_language)
-            language_state["last_user_language"] = response_language
+            # Detect and LOCK language on first turn
+            if not locked_language:
+                response_language = _select_response_language(mode, user_text, stt_language)
+                language_state["last_user_language"] = response_language
+                # Lock the language in session for all future turns
+                if session_id and mode == "hi-en":
+                    CallSession.update_session(session_id, {"locked_language": response_language})
+                    logger.info("[LANGUAGE LOCKED] %s (based on first response)", response_language)
+            
             logger.info("[USER][%s] %s", stt_language or "unknown", user_text)
             logger.info("[LATENCY] DB=%.3fs | STT=%.3fs | audio=%.2fs", db_dur, stt_dur, audio_duration_s)
 

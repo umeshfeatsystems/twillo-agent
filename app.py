@@ -3,6 +3,8 @@ import sys
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from config import Config
 from routes.call_routes import router as call_router
@@ -96,8 +98,15 @@ def create_app() -> FastAPI:
             "twilio": twilio_status,
         }
 
+    # Mount frontend static files
+    app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
     @app.get("/")
     async def root():
+        return RedirectResponse(url="/static/index.html")
+    
+    @app.get("/api")
+    async def api_info():
         return {
             "message": "EMI Recovery Agent API (FastAPI)",
             "version": "2.1.0",

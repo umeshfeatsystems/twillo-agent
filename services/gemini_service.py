@@ -53,7 +53,7 @@ class GeminiService:
                 stream=True,
                 generation_config={
                     "response_mime_type": "text/plain",
-                    "max_output_tokens": 150,
+                    "max_output_tokens": 120,
                     "temperature": 0.2,
                 },
             )
