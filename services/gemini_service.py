@@ -30,7 +30,7 @@ class GeminiService:
             return
 
         history_text = ""
-        for turn in conversation_history[-6:]:
+        for turn in conversation_history[-4:]:
             role = "User" if turn["role"] == "user" else "AI"
             history_text += f"{role}: {turn['content']}\n"
 
@@ -53,8 +53,8 @@ class GeminiService:
                 stream=True,
                 generation_config={
                     "response_mime_type": "text/plain",
-                    "max_output_tokens": 250,
-                    "temperature": 0.3,
+                    "max_output_tokens": 150,
+                    "temperature": 0.2,
                 },
             )
 

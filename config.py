@@ -7,7 +7,7 @@ load_dotenv()
 class Config:
     MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/emi_call_agent")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-2.0-flash")
     TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
     TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
     TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")

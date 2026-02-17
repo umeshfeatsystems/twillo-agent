@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
 from routes.call_routes import router as call_router
-from routes.stream_routes import router as stream_router
+
 from services.gemini_service import gemini_service
 from services.sarvam_service import sarvam_service
 from utils.db import db_instance
@@ -62,7 +62,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(call_router)
-    app.include_router(stream_router)
+
 
     @app.get("/health")
     async def health_check():
