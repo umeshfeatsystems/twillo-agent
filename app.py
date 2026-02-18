@@ -51,9 +51,9 @@ def create_app() -> FastAPI:
         sys.exit(1)
 
     app = FastAPI(
-        title="EMI Recovery Agent API",
+        title="Feat System Calling Agent API",
         version="2.1.0",
-        description="Intelligent recovery agent with Sarvam STT/TTS and Gemini",
+        description="Intelligent calling agent with Sarvam STT/TTS and Gemini",
     )
 
     app.add_middleware(
@@ -92,7 +92,7 @@ def create_app() -> FastAPI:
 
         return {
             "status": "healthy",
-            "service": "EMI Recovery Agent",
+            "service": "Feat System Calling Agent",
             "version": "2.1.0",
             "framework": "FastAPI",
             "mongodb": mongodb_status,
@@ -111,7 +111,7 @@ def create_app() -> FastAPI:
     @app.get("/api")
     async def api_info():
         return {
-            "message": "EMI Recovery Agent API (FastAPI)",
+            "message": "Feat System Calling Agent API (FastAPI)",
             "version": "2.1.0",
             "docs_url": "/docs",
             "endpoints": {"health": "/health", "initiate_call": "POST /api/call/initiate"},
@@ -124,7 +124,7 @@ app = create_app()
 
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print("STARTING EMI RECOVERY AGENT (FastAPI)")
+    print("STARTING FEAT SYSTEM CALLING AGENT (FastAPI)")
     print("=" * 60)
     print("Swagger UI: http://localhost:8000/docs")
     print("Base URL:   http://localhost:8000")

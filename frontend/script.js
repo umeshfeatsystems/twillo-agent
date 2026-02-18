@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   EMI Call Agent — Dashboard Logic
+   Feat System Calling Agent — Dashboard Logic
    ═══════════════════════════════════════════════ */
 
 const API = window.location.origin;
@@ -21,6 +21,51 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     });
 });
 
+// ─── Call Type Field Toggle ───
+function toggleCallTypeFields() {
+    const callType = document.getElementById('callType').value;
+    const emiFields = document.getElementById('emiFields');
+    const salesFields = document.getElementById('salesFields');
+    if (callType === 'sales') {
+        emiFields.style.display = 'none';
+        salesFields.style.display = 'block';
+    } else {
+        emiFields.style.display = 'block';
+        salesFields.style.display = 'none';
+    }
+}
+
+// ─── AI Description Generator ───
+async function generateDescription() {
+    const productName = document.getElementById('productName').value.trim();
+    if (!productName) {
+        alert('Please enter a product name first');
+        return;
+    }
+    const btn = document.getElementById('generateDescBtn');
+    const textarea = document.getElementById('productDescription');
+    btn.textContent = '⏳ Generating...';
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API}/api/call/generate-description`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_name: productName })
+        });
+        const data = await res.json();
+        if (data.description) {
+            textarea.value = data.description;
+        } else {
+            alert(data.error || 'Failed to generate description');
+        }
+    } catch (err) {
+        alert('Error generating description: ' + err.message);
+    } finally {
+        btn.innerHTML = '✨ Generate with AI';
+        btn.disabled = false;
+    }
+}
+
 // ─── Modal ───
 function showModal(customerData) {
     const modal = document.getElementById('modal');
@@ -39,16 +84,24 @@ function showModal(customerData) {
         document.getElementById('amount').value = customerData.amount || '';
         document.getElementById('daysOverdue').value = customerData.days_overdue || '';
         document.getElementById('loanType').value = customerData.loan_type || 'Personal Loan';
-        document.getElementById('bankName').value = customerData.bank_name || 'HDFC Bank';
+        document.getElementById('companyName').value = customerData.company_name || customerData.bank_name || 'Feat System';
+        document.getElementById('voiceSelect').value = customerData.voice || 'shubh';
+        document.getElementById('callType').value = customerData.call_type || 'emi_reminder';
+        document.getElementById('productName').value = customerData.product_name || '';
+        document.getElementById('productDescription').value = customerData.product_description || '';
         if (customerData.due_date) {
             try { document.getElementById('dueDate').value = customerData.due_date; } catch (e) { }
         }
         document.getElementById('saveCustomer').checked = false;
+        toggleCallTypeFields();
     } else {
         document.getElementById('callForm').reset();
         document.getElementById('saveCustomer').checked = true;
-        document.getElementById('bankName').value = 'HDFC Bank';
+        document.getElementById('companyName').value = 'Feat System';
+        document.getElementById('voiceSelect').value = 'shubh';
+        document.getElementById('callType').value = 'emi_reminder';
         document.getElementById('dueDate').valueAsDate = tomorrow;
+        toggleCallTypeFields();
     }
 }
 
@@ -73,13 +126,25 @@ document.getElementById('callForm').addEventListener('submit', async (e) => {
     const formData = new FormData(e.target);
     const name = formData.get('name');
     const phone = formData.get('phoneNumber');
-    const amount = formData.get('amount');
-    const daysOverdue = formData.get('daysOverdue');
-    const loanType = formData.get('loanType') || 'Personal Loan';
-    const dueDate = formData.get('dueDate') || 'today';
-    const bankName = formData.get('bankName') || 'HDFC Bank';
+    const callType = formData.get('callType') || 'emi_reminder';
+    const companyName = formData.get('companyName') || 'Feat System';
     const languageMode = formData.get('languageMode');
+    const voice = formData.get('voice') || 'shubh';
     const saveCustomer = document.getElementById('saveCustomer').checked;
+
+    // Build call_details based on call type
+    const callDetails = { name, company_name: companyName, bank_name: companyName, voice };
+
+    if (callType === 'sales') {
+        callDetails.product_name = formData.get('productName') || '';
+        callDetails.product_description = formData.get('productDescription') || '';
+        callDetails.call_type = 'sales';
+    } else {
+        callDetails.amount = formData.get('amount');
+        callDetails.days_overdue = formData.get('daysOverdue');
+        callDetails.loan_type = formData.get('loanType') || 'Personal Loan';
+        callDetails.due_date = formData.get('dueDate') || 'today';
+    }
 
     // Loading
     btn.disabled = true;
@@ -87,11 +152,11 @@ document.getElementById('callForm').addEventListener('submit', async (e) => {
 
     try {
         // Save customer if checked
-        if (saveCustomer) {
+        if (saveCustomer && callType !== 'sales') {
             await fetch(`${API}/api/customers`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, phone, amount: parseFloat(amount), loan_type: loanType, due_date: dueDate, days_overdue: parseInt(daysOverdue), bank_name: bankName })
+                body: JSON.stringify({ name, phone, amount: parseFloat(callDetails.amount || 0), loan_type: callDetails.loan_type || 'Personal Loan', due_date: callDetails.due_date || '', days_overdue: parseInt(callDetails.days_overdue || 0), bank_name: companyName })
             });
         }
 
@@ -101,9 +166,9 @@ document.getElementById('callForm').addEventListener('submit', async (e) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 phone_number: phone,
-                call_type: 'emi_reminder',
+                call_type: callType,
                 language_mode: languageMode,
-                call_details: { name, amount, days_overdue: daysOverdue, loan_type: loanType, due_date: dueDate, bank_name: bankName }
+                call_details: callDetails
             })
         });
 

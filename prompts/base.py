@@ -4,11 +4,13 @@ Prompt registry and rendering utilities.
 from typing import Any, Dict, Optional, Tuple
 
 from prompts.emi_prompt import EMI_REMINDER_PROMPT
+from prompts.sales_prompt import SALES_CALL_PROMPT
 
 DEFAULT_CALL_TYPE = "emi_reminder"
 
 PROMPT_LIBRARY: Dict[str, Dict[str, str]] = {
     "emi_reminder": EMI_REMINDER_PROMPT,
+    "sales": SALES_CALL_PROMPT,
 
     "payment_followup": {
         "system_prompt": """\

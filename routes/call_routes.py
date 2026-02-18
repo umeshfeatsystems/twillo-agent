@@ -26,6 +26,50 @@ logger = logging.getLogger("CallRoutes")
 router = APIRouter(prefix="/api/call", tags=["Call Logic"])
 twilio_service = TwilioService()
 
+
+class GenerateDescriptionRequest(BaseModel):
+    product_name: str
+
+
+@router.post("/generate-description")
+async def generate_description(req: GenerateDescriptionRequest):
+    """Use Gemini to auto-generate a product description from a product name."""
+    if not gemini_service.model:
+        return {"description": "", "error": "Gemini is not configured"}
+    try:
+        prompt = f"""You are an expert sales copywriter. A sales agent will read this description 
+to a prospect over a phone call, so it must be clear, complete, and informative.
+
+Product: "{req.product_name}"
+
+Write a complete product description in exactly 4-5 sentences:
+- Sentence 1: What the product is and what it does
+- Sentence 2: Who it is designed for (target audience)  
+- Sentence 3-4: Key benefits and specific features that set it apart
+- Sentence 5: A compelling closing statement about its value
+
+IMPORTANT: You MUST complete every sentence. Do not stop mid-sentence.
+Write in plain text only. No bullet points, no markdown, no headings.
+Keep it professional, specific, and persuasive."""
+
+        def _call_gemini():
+            return gemini_service.model.generate_content(
+                prompt,
+                generation_config={
+                    "max_output_tokens": 500,
+                    "temperature": 0.7,
+                },
+            )
+
+        response = await asyncio.to_thread(_call_gemini)
+        text = (response.text or "").strip()
+        if not text:
+            return {"description": "", "error": "Gemini returned empty response"}
+        return {"description": text}
+    except Exception as exc:
+        logger.error("Generate description failed: %s", exc)
+        return {"description": "", "error": str(exc)}
+
 # Constants from stream_routes.py
 BYTES_PER_SECOND_MULAW = 8000
 RMS_SPEECH_THRESHOLD = 300
@@ -190,7 +234,8 @@ async def initiate_call(request: CallRequest):
             {"call_details": enriched_call_details},
             resolved_language_mode or "en",
         )
-        sarvam_service.synthesize_to_mulaw(formatted_greeting, language_code=greeting_lang)
+        voice = enriched_call_details.get("voice")
+        sarvam_service.synthesize_to_mulaw(formatted_greeting, language_code=greeting_lang, voice_override=voice)
         
         result = twilio_service.initiate_call(request.phone_number, session_id)
         
@@ -257,13 +302,13 @@ async def websocket_endpoint(websocket: WebSocket):
     min_utterance_bytes = int(BYTES_PER_SECOND_MULAW * MIN_UTTERANCE_SECONDS)
     max_utterance_bytes = int(BYTES_PER_SECOND_MULAW * MAX_UTTERANCE_SECONDS)
 
-    async def send_audio_packet(text: str, language_code: str):
+    async def send_audio_packet(text: str, language_code: str, voice_override: str = None):
         if not text or not stream_sid or stop_event.is_set(): return
         try:
             tts_start = time.time()
             # Run synchronous TTS in thread pool to avoid blocking event loop
             audio_bytes = await loop.run_in_executor(
-                None, sarvam_service.synthesize_to_mulaw, text, language_code
+                None, sarvam_service.synthesize_to_mulaw, text, language_code, voice_override
             )
             tts_dur = time.time() - tts_start
             if not audio_bytes:
@@ -364,6 +409,9 @@ async def websocket_endpoint(websocket: WebSocket):
             llm_first_chunk_time = None
             MAX_TTS_CHARS = 120
 
+            # Retrieve selected voice from session
+            session_voice = (session.get("call_details") or {}).get("voice") if session else None
+
             # Collect full LLM response — sending ONE TTS call is faster
             # than multiple calls (each has ~1.3s minimum API overhead)
             for chunk in response_generator:
@@ -383,7 +431,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if len(clean_response) <= MAX_TTS_CHARS:
                     sentence_count = 1
                     fut = asyncio.run_coroutine_threadsafe(
-                        send_audio_packet(clean_response, response_language), loop
+                        send_audio_packet(clean_response, response_language, session_voice), loop
                     )
                     tts_futures.append(fut)
                 else:
@@ -393,7 +441,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         if len(remaining) <= MAX_TTS_CHARS:
                             sentence_count += 1
                             fut = asyncio.run_coroutine_threadsafe(
-                                send_audio_packet(remaining, response_language), loop
+                                send_audio_packet(remaining, response_language, session_voice), loop
                             )
                             tts_futures.append(fut)
                             remaining = ""
@@ -414,7 +462,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             if piece:
                                 sentence_count += 1
                                 fut = asyncio.run_coroutine_threadsafe(
-                                    send_audio_packet(piece, response_language), loop
+                                    send_audio_packet(piece, response_language, session_voice), loop
                                 )
                                 tts_futures.append(fut)
                             remaining = remaining[split_at:].strip()
@@ -498,7 +546,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     if session and session.get("initial_greeting"):
                         mode = _resolve_language_mode(session)
                         greeting_language = _resolve_initial_language_code(session, mode)
-                        await send_audio_packet(session["initial_greeting"], greeting_language)
+                        session_voice = (session.get("call_details") or {}).get("voice")
+                        await send_audio_packet(session["initial_greeting"], greeting_language, session_voice)
 
             elif event_type == "media":
                 if not stop_event.is_set():
